@@ -84,8 +84,7 @@ mod tests {
 
     #[test]
     fn test_decision_metadata_with_transform() {
-        let meta = DecisionMetadata::new()
-            .with_transform_applied("jq: .user.name");
+        let meta = DecisionMetadata::new().with_transform_applied("jq: .user.name");
         assert_eq!(meta.transforms_applied.len(), 1);
     }
 

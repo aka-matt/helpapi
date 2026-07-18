@@ -52,8 +52,9 @@ mod tests {
 
     #[test]
     fn test_decision_mock_serialization() {
-        let response = ResponseData::new(200)
-            .with_body(super::super::body::BodyData::Json(serde_json::json!({"id": 1})));
+        let response = ResponseData::new(200).with_body(super::super::body::BodyData::Json(
+            serde_json::json!({"id": 1}),
+        ));
         let metadata = DecisionMetadata::new()
             .with_route_id("get-user")
             .with_matcher_result("method: GET")
@@ -73,8 +74,7 @@ mod tests {
 
     #[test]
     fn test_decision_forward_serialization() {
-        let plan = ForwardPlan::new("https://api.example.com/users", "GET")
-            .with_timeout(5000);
+        let plan = ForwardPlan::new("https://api.example.com/users", "GET").with_timeout(5000);
         let metadata = DecisionMetadata::new()
             .with_route_id("proxy-route")
             .with_matcher_result("method: GET")

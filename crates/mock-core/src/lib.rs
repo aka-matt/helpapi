@@ -11,6 +11,7 @@ pub mod matcher;
 pub mod metadata;
 pub mod request;
 pub mod response;
+pub mod transform;
 
 // Re-exports for convenience
 pub use body::BodyData;
@@ -24,6 +25,13 @@ pub use matcher::{
 pub use metadata::DecisionMetadata;
 pub use request::{MatchedRequestContext, RequestData};
 pub use response::ResponseData;
+pub use transform::{Transform, TransformError};
+
+// Re-export individual transforms for convenience
+pub use transform::{
+    RemoveHeader, RemoveJsonPointer, RemoveQuery, ReplaceBody, SetHeader, SetJsonPointer, SetQuery,
+    SetStatus, TemplateSubst,
+};
 
 /// Core mock engine.
 pub struct Engine;

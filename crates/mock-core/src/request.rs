@@ -17,6 +17,9 @@ pub struct RequestData {
     pub headers: Vec<(String, String)>,
     /// Request body.
     pub body: BodyData,
+    /// Path parameters extracted from route matching.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub path_params: HashMap<String, String>,
 }
 
 impl RequestData {
@@ -28,6 +31,7 @@ impl RequestData {
             query: Vec::new(),
             headers: Vec::new(),
             body: BodyData::Empty,
+            path_params: HashMap::new(),
         }
     }
 
@@ -48,6 +52,12 @@ impl RequestData {
     /// Sets the body.
     pub fn with_body(self, body: BodyData) -> Self {
         Self { body, ..self }
+    }
+
+    /// Sets the path parameters.
+    pub fn with_path_params(mut self, path_params: HashMap<String, String>) -> Self {
+        self.path_params = path_params;
+        self
     }
 
     /// Returns the value of the first header matching the given lowercase key.
@@ -117,21 +127,20 @@ mod tests {
 
     #[test]
     fn test_request_data_with_query() {
-        let req = RequestData::new("GET", "/search")
-            .with_query(vec![
-                ("b".to_string(), "2".to_string()),
-                ("a".to_string(), "1".to_string()),
-            ]);
+        let req = RequestData::new("GET", "/search").with_query(vec![
+            ("b".to_string(), "2".to_string()),
+            ("a".to_string(), "1".to_string()),
+        ]);
         assert_eq!(req.query[0].0, "a");
         assert_eq!(req.query[1].0, "b");
     }
 
     #[test]
     fn test_request_data_with_headers() {
-        let req = RequestData::new("POST", "/api")
-            .with_headers(vec![
-                ("content-type".to_string(), "application/json".to_string()),
-            ]);
+        let req = RequestData::new("POST", "/api").with_headers(vec![(
+            "content-type".to_string(),
+            "application/json".to_string(),
+        )]);
         assert_eq!(req.header("content-type"), Some("application/json"));
     }
 
@@ -151,8 +160,7 @@ mod tests {
 
     #[test]
     fn test_matched_request_context_with_path_param() {
-        let ctx = MatchedRequestContext::new("get-user")
-            .with_path_param("id", "42");
+        let ctx = MatchedRequestContext::new("get-user").with_path_param("id", "42");
         assert_eq!(ctx.path_params.get("id"), Some(&"42".to_string()));
     }
 

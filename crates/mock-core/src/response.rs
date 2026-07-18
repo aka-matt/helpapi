@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use super::body::BodyData;
@@ -13,6 +15,9 @@ pub struct ResponseData {
     pub body: BodyData,
     /// Optional delay in milliseconds before sending the response.
     pub delay_ms: Option<u64>,
+    /// Path parameters extracted from route matching (for template substitution).
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub path_params: HashMap<String, String>,
 }
 
 impl ResponseData {
@@ -23,6 +28,7 @@ impl ResponseData {
             headers: Vec::new(),
             body: BodyData::Empty,
             delay_ms: None,
+            path_params: HashMap::new(),
         }
     }
 
@@ -40,6 +46,12 @@ impl ResponseData {
     /// Sets the delay in milliseconds.
     pub fn with_delay(mut self, delay_ms: u64) -> Self {
         self.delay_ms = Some(delay_ms);
+        self
+    }
+
+    /// Sets the path parameters (for template substitution).
+    pub fn with_path_params(mut self, path_params: HashMap<String, String>) -> Self {
+        self.path_params = path_params;
         self
     }
 
@@ -74,15 +86,16 @@ mod tests {
 
     #[test]
     fn test_response_data_with_headers() {
-        let resp = ResponseData::new(200)
-            .with_headers(vec![("Content-Type".to_string(), "application/json".to_string())]);
+        let resp = ResponseData::new(200).with_headers(vec![(
+            "Content-Type".to_string(),
+            "application/json".to_string(),
+        )]);
         assert_eq!(resp.header("content-type"), Some("application/json"));
     }
 
     #[test]
     fn test_response_data_with_body() {
-        let resp = ResponseData::new(201)
-            .with_body(BodyData::Json(serde_json::json!({"id": 1})));
+        let resp = ResponseData::new(201).with_body(BodyData::Json(serde_json::json!({"id": 1})));
         assert!(!resp.body.is_empty());
     }
 

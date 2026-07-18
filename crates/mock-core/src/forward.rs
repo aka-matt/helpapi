@@ -73,8 +73,10 @@ mod tests {
 
     #[test]
     fn test_forward_plan_with_headers() {
-        let plan = ForwardPlan::new("https://api.example.com/users", "POST")
-            .with_headers(vec![("Authorization".to_string(), "Bearer token".to_string())]);
+        let plan = ForwardPlan::new("https://api.example.com/users", "POST").with_headers(vec![(
+            "Authorization".to_string(),
+            "Bearer token".to_string(),
+        )]);
         assert_eq!(plan.headers.len(), 1);
     }
 
@@ -87,17 +89,14 @@ mod tests {
 
     #[test]
     fn test_forward_plan_with_timeout() {
-        let plan = ForwardPlan::new("https://api.example.com/users", "GET")
-            .with_timeout(5000);
+        let plan = ForwardPlan::new("https://api.example.com/users", "GET").with_timeout(5000);
         assert_eq!(plan.timeout_ms, Some(5000));
     }
 
     #[test]
     fn test_forward_plan_with_context() {
-        let ctx = MatchedRequestContext::new("proxy-route")
-            .with_path_param("id", "123");
-        let plan = ForwardPlan::new("https://api.example.com/users", "GET")
-            .with_context(ctx);
+        let ctx = MatchedRequestContext::new("proxy-route").with_path_param("id", "123");
+        let plan = ForwardPlan::new("https://api.example.com/users", "GET").with_context(ctx);
         assert_eq!(plan.context.route_id, "proxy-route");
         assert_eq!(plan.context.path_params.get("id"), Some(&"123".to_string()));
     }
