@@ -13,3 +13,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 schemars = { version = "0.8", features = ["derive"] }
 url = { workspace = true }
+
+[dependencies.mock-core]
+path = "../mock-core"
+version = "0.1.0"

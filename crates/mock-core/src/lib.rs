@@ -5,6 +5,7 @@
 
 pub mod body;
 pub mod decision;
+pub mod engine;
 pub mod error;
 pub mod forward;
 pub mod matcher;
@@ -33,5 +34,5 @@ pub use transform::{
     SetStatus, TemplateSubst,
 };
 
-/// Core mock engine.
-pub struct Engine;
+// Re-export Engine
+pub use engine::Engine;
