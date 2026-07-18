@@ -4,6 +4,8 @@
 //! on tokio, axum, reqwest, ratatui, or wasm-bindgen.
 
 pub mod body;
+pub mod decision;
+pub mod error;
 pub mod forward;
 pub mod metadata;
 pub mod request;
@@ -11,6 +13,8 @@ pub mod response;
 
 // Re-exports for convenience
 pub use body::BodyData;
+pub use decision::Decision;
+pub use error::EngineError;
 pub use forward::ForwardPlan;
 pub use metadata::DecisionMetadata;
 pub use request::{MatchedRequestContext, RequestData};
