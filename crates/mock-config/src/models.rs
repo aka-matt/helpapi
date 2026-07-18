@@ -2,26 +2,22 @@
 //!
 //! These types are serializable with serde and are consumed by mock-core and mock-cli.
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Body data variants for request/response bodies.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BodyData {
+    #[default]
     Empty,
     Text(String),
     Json(serde_json::Value),
 }
 
-impl Default for BodyData {
-    fn default() -> Self {
-        BodyData::Empty
-    }
-}
-
 /// Top-level configuration structure.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Config {
     pub version: u32,
     pub server: ServerConfig,
@@ -44,7 +40,7 @@ impl Default for Config {
 }
 
 /// Server binding configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
@@ -60,7 +56,7 @@ impl Default for ServerConfig {
 }
 
 /// Default settings applied to all routes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DefaultsConfig {
     pub upstream_timeout_ms: u64,
     pub max_body_bytes: usize,
@@ -76,7 +72,7 @@ impl Default for DefaultsConfig {
 }
 
 /// Route definition linking a match rule to an action.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Route {
     pub id: String,
     pub priority: i32,
@@ -85,7 +81,7 @@ pub struct Route {
 }
 
 /// Rule for matching incoming requests.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MatchRule {
     #[serde(default)]
     pub method: Option<String>,
@@ -100,7 +96,7 @@ pub struct MatchRule {
 }
 
 /// Action to take when a route matches.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Action {
     Mock {
@@ -116,7 +112,7 @@ pub enum Action {
 }
 
 /// Response returned for a mock action.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Response {
     pub status: u16,
     #[serde(default)]
@@ -130,7 +126,7 @@ pub struct Response {
 }
 
 /// Transform operations for request/response modification.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Transform {
     SetHeader {
@@ -163,13 +159,13 @@ pub enum Transform {
 }
 
 /// Configuration for requests that match no route.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UnmatchedConfig {
     pub action: Action,
 }
 
 /// Validation issue found during config validation.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ValidationIssue {
     pub code: String,
     pub path: String,
@@ -180,7 +176,7 @@ pub struct ValidationIssue {
 }
 
 /// Severity level of a validation issue.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ValidationSeverity {
     Error,
@@ -260,7 +256,10 @@ mod tests {
         let cases = vec![
             (BodyData::Empty, r#""empty""#),
             (BodyData::Text("hello".to_string()), r#""hello""#),
-            (BodyData::Json(serde_json::json!({"a": 1})), r#"{"json":{"a":1}}"#),
+            (
+                BodyData::Json(serde_json::json!({"a": 1})),
+                r#"{"json":{"a":1}}"#,
+            ),
         ];
 
         for (variant, _expected_pattern) in cases {
