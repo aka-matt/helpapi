@@ -1,0 +1,13 @@
+[package]
+name = "mock-runtime"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mock-core = { path = "../mock-core" }
+mock-config = { path = "../mock-config" }
+mock-http = { path = "../mock-http" }
+tokio = { version = "1", features = ["full"] }
+tracing = { workspace = true }

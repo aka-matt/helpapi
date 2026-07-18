@@ -1,0 +1,15 @@
+[package]
+name = "mock-http"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+mock-core = { path = "../mock-core" }
+mock-config = { path = "../mock-config" }
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+reqwest = { version = "0.12", features = ["json"] }
+tower = "0.4"
+tracing = { workspace = true }
