@@ -4,10 +4,24 @@ use crate::{Config, ConfigError};
 
 /// Parses a JSON string into a Config value.
 ///
-/// Maps serde JSON errors to ConfigError::Parse with path context.
+/// Maps serde JSON errors to ConfigError::Parse with JSON Pointer path context.
 pub fn parse_json(input: &str) -> Result<Config, ConfigError> {
-    let config: Config = serde_json::from_str(input)?;
-    Ok(config)
+    let mut de = serde_json::Deserializer::from_str(input);
+    serde_path_to_error::deserialize(&mut de).map_err(|e| {
+        let path = e.path();
+        let path_str = path.to_string();
+        // Convert dot notation (dependencies.serde.version) to JSON Pointer format (/dependencies/serde/version)
+        let json_pointer = if path_str.is_empty() {
+            String::new()
+        } else {
+            format!("/{}", path_str.replace('.', "/"))
+        };
+        if json_pointer.is_empty() {
+            ConfigError::Parse(e.to_string())
+        } else {
+            ConfigError::Parse(format!("at {}: {}", json_pointer, e))
+        }
+    })
 }
 
 /// Parses a JSON string and validates the resulting Config.

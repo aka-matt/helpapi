@@ -5,9 +5,9 @@ use thiserror::Error;
 /// Errors that can occur when parsing or validating configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    /// JSON parsing error.
-    #[error("failed to parse JSON: {0}")]
-    Parse(#[from] serde_json::Error),
+    /// JSON parsing error with JSON Pointer path context.
+    #[error("JSON parse error: {0}")]
+    Parse(String),
 
     /// I/O error when reading configuration files.
     #[error("I/O error: {0}")]
