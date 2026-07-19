@@ -114,6 +114,8 @@ impl Engine {
     /// Returns [`EngineError::CompileError`] if the JSON is invalid or
     /// any route cannot be compiled (e.g., invalid match pattern).
     pub fn compile(config_json: &str) -> Result<Self, EngineError> {
+        crate::validate::validate_for_engine(config_json).map_err(EngineError::CompileError)?;
+
         let config: serde_json::Value = serde_json::from_str(config_json)
             .map_err(|e| EngineError::CompileError(format!("invalid JSON: {}", e)))?;
 
@@ -1046,6 +1048,54 @@ mod tests {
     fn test_compile_missing_routes() {
         let result = Engine::compile(r#"{"defaults": {"upstream_timeout_ms": 5000}}"#);
         assert!(result.is_err());
+    }
+
+    // --- B4: semantic validation in Engine::compile ---
+
+    #[test]
+    fn test_compile_duplicate_route_id_fails() {
+        let json = r#"{
+            "version": 1,
+            "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
+            "routes": [
+                {"id": "same", "priority": 100, "match_rule": {"method": "GET", "path": "/a"}, "action": {"type": "mock", "response": {"status": 200}}},
+                {"id": "same", "priority": 50, "match_rule": {"method": "GET", "path": "/b"}, "action": {"type": "mock", "response": {"status": 200}}}
+            ]
+        }"#;
+        let result = Engine::compile(json);
+        assert!(
+            matches!(result, Err(EngineError::CompileError(ref s)) if s.contains("DUPLICATE_ROUTE_ID"))
+        );
+    }
+
+    #[test]
+    fn test_compile_invalid_version_fails() {
+        let json = r#"{
+            "version": 2, "server": {"host": "127.0.0.1", "port": 8080},
+            "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
+            "routes": []
+        }"#;
+        let result = Engine::compile(json);
+        assert!(
+            matches!(result, Err(EngineError::CompileError(ref s)) if s.contains("INVALID_VERSION"))
+        );
+    }
+
+    #[test]
+    fn test_compile_invalid_upstream_url_fails() {
+        let json = r#"{
+            "version": 1,
+            "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
+            "routes": [{
+                "id": "fwd", "priority": 100,
+                "match_rule": {"method": "GET", "path": "/x"},
+                "action": {"type": "forward", "upstream": "not-a-url"}
+            }]
+        }"#;
+        let result = Engine::compile(json);
+        assert!(
+            matches!(result, Err(EngineError::CompileError(ref s)) if s.contains("INVALID_UPSTREAM_URL"))
+        );
     }
 
     // --- Typed Transform loading (Task B2) ---

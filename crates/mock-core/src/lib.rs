@@ -13,6 +13,7 @@ pub mod metadata;
 pub mod request;
 pub mod response;
 pub mod transform;
+pub mod validate;
 
 // Re-exports for convenience
 pub use body::BodyData;

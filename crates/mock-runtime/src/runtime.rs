@@ -305,19 +305,27 @@ mod tests {
         }"#
     }
 
-    fn bad_engine_config() -> &'static str {
-        // Config that passes mock_config validation but fails Engine::compile
-        // method: null is not valid for Engine (expects string)
+    fn duplicate_id_engine_config() -> &'static str {
+        // Config that fails Engine::compile via B4's duplicate-route-id check
+        // (also fails mock_config::validate).
         r#"{
             "version": 1,
             "server": { "host": "127.0.0.1", "port": 0 },
             "defaults": { "upstream_timeout_ms": 5000, "max_body_bytes": 1048576 },
-            "routes": [{
-                "id": "bad-route",
-                "priority": 100,
-                "match_rule": { "method": null },
-                "action": { "type": "mock", "response": { "status": 200 } }
-            }]
+            "routes": [
+                {
+                    "id": "dupe",
+                    "priority": 100,
+                    "match_rule": { "method": "GET", "path": "/a" },
+                    "action": { "type": "mock", "response": { "status": 200 } }
+                },
+                {
+                    "id": "dupe",
+                    "priority": 50,
+                    "match_rule": { "method": "GET", "path": "/b" },
+                    "action": { "type": "mock", "response": { "status": 200 } }
+                }
+            ]
         }"#
     }
 
@@ -497,7 +505,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reload_bad_engine_preserves_old() {
-        // Config that passes mock_config validation but fails Engine::compile
+        // Config that fails Engine::compile via B4's duplicate-route-id check (also fails mock_config::validate)
         let mut runtime = Runtime::new(valid_config()).await.unwrap();
         let mut receiver = runtime.subscribe();
 
@@ -509,7 +517,7 @@ mod tests {
             .await;
 
         // Attempt reload with bad engine config
-        let result = runtime.reload(bad_engine_config()).await;
+        let result = runtime.reload(duplicate_id_engine_config()).await;
         assert!(result.is_err()); // Should fail at Engine::compile
         assert_eq!(runtime.status(), RuntimeStatus::Running);
 
