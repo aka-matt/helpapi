@@ -4,11 +4,7 @@
 //! in the TUI, including sensitive header masking.
 
 /// List of sensitive header names that should be masked in the UI.
-const SENSITIVE_HEADERS: &[&str] = &[
-    "authorization",
-    "cookie",
-    "proxy-authorization",
-];
+const SENSITIVE_HEADERS: &[&str] = &["authorization", "cookie", "proxy-authorization"];
 
 /// Masked value used for sensitive headers.
 const MASKED_VALUE: &str = "***MASKED***";

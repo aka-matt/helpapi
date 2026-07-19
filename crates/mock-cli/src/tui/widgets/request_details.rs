@@ -1,11 +1,11 @@
 //! Request details widget showing request/response headers, body preview, and matched rule.
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
 use crate::tui::event_handler::{mask_sensitive_headers, truncate_body};
@@ -48,9 +48,10 @@ impl RequestDetails {
         let mut lines: Vec<Line> = Vec::new();
 
         // Request section header
-        lines.push(Line::from(vec![
-            Span::styled("─── Request ───", Style::default().fg(Color::Yellow)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "─── Request ───",
+            Style::default().fg(Color::Yellow),
+        )]));
 
         // Method and path
         lines.push(Line::from(vec![
@@ -63,9 +64,10 @@ impl RequestDetails {
         ]));
 
         // Request headers
-        lines.push(Line::from(vec![
-            Span::styled("Headers:", Style::default().fg(Color::Cyan)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Headers:",
+            Style::default().fg(Color::Cyan),
+        )]));
         let masked_req_headers = mask_sensitive_headers(&selected.request_headers);
         for (key, value) in &masked_req_headers {
             lines.push(Line::from(vec![
@@ -76,9 +78,10 @@ impl RequestDetails {
         }
 
         // Request body (truncated to 32 KiB for display)
-        lines.push(Line::from(vec![
-            Span::styled("Body:", Style::default().fg(Color::Cyan)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Body:",
+            Style::default().fg(Color::Cyan),
+        )]));
         let truncated_body = truncate_body(&selected.request_body);
         let body_str = decode_body(truncated_body);
         for line in body_str.lines().take(20) {
@@ -88,23 +91,28 @@ impl RequestDetails {
             ]));
         }
         if body_str.lines().count() > 20 {
-            lines.push(Line::from(vec![
-                Span::styled("  ...", Style::default().fg(Color::Gray)),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "  ...",
+                Style::default().fg(Color::Gray),
+            )]));
         }
 
         // Add some spacing
         lines.push(Line::from(""));
 
         // Response section header
-        lines.push(Line::from(vec![
-            Span::styled("─── Response ───", Style::default().fg(Color::Yellow)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "─── Response ───",
+            Style::default().fg(Color::Yellow),
+        )]));
 
         // Status and latency
         lines.push(Line::from(vec![
             Span::styled("Status: ", Style::default().fg(Color::Cyan)),
-            Span::styled(status_str(selected.status), Style::default().fg(status_color(selected.status))),
+            Span::styled(
+                status_str(selected.status),
+                Style::default().fg(status_color(selected.status)),
+            ),
         ]));
         lines.push(Line::from(vec![
             Span::styled("Latency: ", Style::default().fg(Color::Cyan)),
@@ -133,13 +141,12 @@ impl RequestDetails {
         ]));
 
         // Response headers
-        lines.push(Line::from(vec![
-            Span::styled("Headers:", Style::default().fg(Color::Cyan)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Headers:",
+            Style::default().fg(Color::Cyan),
+        )]));
         if selected.response_headers.is_empty() {
-            lines.push(Line::from(vec![
-                Span::raw("  -"),
-            ]));
+            lines.push(Line::from(vec![Span::raw("  -")]));
         } else {
             let masked_resp_headers = mask_sensitive_headers(&selected.response_headers);
             for (key, value) in &masked_resp_headers {
@@ -152,15 +159,14 @@ impl RequestDetails {
         }
 
         // Response body (truncated to 32 KiB for display)
-        lines.push(Line::from(vec![
-            Span::styled("Body:", Style::default().fg(Color::Cyan)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "Body:",
+            Style::default().fg(Color::Cyan),
+        )]));
         let truncated_resp_body = truncate_body(&selected.response_body);
         let resp_body_str = decode_body(truncated_resp_body);
         if resp_body_str.is_empty() {
-            lines.push(Line::from(vec![
-                Span::raw("  -"),
-            ]));
+            lines.push(Line::from(vec![Span::raw("  -")]));
         } else {
             for line in resp_body_str.lines().take(20) {
                 lines.push(Line::from(vec![
@@ -169,9 +175,10 @@ impl RequestDetails {
                 ]));
             }
             if resp_body_str.lines().count() > 20 {
-                lines.push(Line::from(vec![
-                    Span::styled("  ...", Style::default().fg(Color::Gray)),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "  ...",
+                    Style::default().fg(Color::Gray),
+                )]));
             }
         }
 
@@ -199,7 +206,7 @@ impl Default for RequestDetails {
 /// Returns the color for a status code.
 fn status_color(status: u16) -> Color {
     match status {
-        0 => Color::Red,       // Error/failure
+        0 => Color::Red, // Error/failure
         100..=199 => Color::Cyan,
         200..=299 => Color::Green,
         300..=399 => Color::Yellow,

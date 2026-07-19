@@ -9,8 +9,8 @@ mod error;
 pub use engine::WasmMockEngine;
 pub use error::WasmError;
 
-use wasm_bindgen::prelude::*;
 use mock_config::parse_and_validate;
+use wasm_bindgen::prelude::*;
 
 /// Validates a JSON config string.
 ///
@@ -20,12 +20,10 @@ use mock_config::parse_and_validate;
 pub fn validate_config(config_json: &str) -> String {
     match parse_and_validate(config_json) {
         Ok(_) => r#"{"ok":true}"#.to_string(),
-        Err(e) => {
-            serde_json::json!({
-                "ok": false,
-                "error": e.to_string()
-            })
-            .to_string()
-        }
+        Err(e) => serde_json::json!({
+            "ok": false,
+            "error": e.to_string()
+        })
+        .to_string(),
     }
 }

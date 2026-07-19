@@ -80,7 +80,11 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Commands::Run { config, log_format, mode } => {
+        Commands::Run {
+            config,
+            log_format,
+            mode,
+        } => {
             use commands::run::RunCommand;
 
             let config_path = match config {

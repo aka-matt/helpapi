@@ -236,7 +236,7 @@ async fn handle_route(
             path: path.clone(),
             headers: headers_vec.clone(),
             body: Vec::new(), // Will be filled in after reading body
-            rule_id: None,   // Will be filled in after decision
+            rule_id: None,    // Will be filled in after decision
             upstream_url: None,
         };
         let _ = tx

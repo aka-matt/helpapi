@@ -67,7 +67,8 @@ impl WasmMockEngine {
     ) -> Result<String, JsValue> {
         let context: MatchedRequestContext =
             serde_json::from_str(context_json).map_err(WasmError::from)?;
-        let response: ResponseData = serde_json::from_str(response_json).map_err(WasmError::from)?;
+        let response: ResponseData =
+            serde_json::from_str(response_json).map_err(WasmError::from)?;
         let transformed = self
             .engine
             .transform_upstream_response(&context, response)

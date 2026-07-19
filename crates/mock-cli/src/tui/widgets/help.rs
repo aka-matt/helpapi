@@ -1,11 +1,11 @@
 //! Help bar widget showing keyboard shortcuts.
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::tui::state::AppState;
@@ -45,7 +45,9 @@ impl HelpBar {
             lines.push(Line::from(vec![
                 Span::styled(
                     format!(" {: <4}", key),
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(desc, Style::default().fg(Color::White)),
             ]));

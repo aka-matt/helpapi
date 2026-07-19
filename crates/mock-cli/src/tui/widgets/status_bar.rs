@@ -1,11 +1,11 @@
 //! Status bar widget showing runtime status, address, and rule count.
 
 use ratatui::{
+    Frame,
     layout::{Alignment, Rect},
     style::{Color, Style},
     text::{Line, Span},
     widgets::Paragraph,
-    Frame,
 };
 
 use crate::tui::state::AppState;
@@ -38,10 +38,7 @@ impl StatusBar {
             mock_runtime::RuntimeStatus::Failed => Color::Red,
         };
 
-        let address_text = state
-            .server_address
-            .as_deref()
-            .unwrap_or("not bound");
+        let address_text = state.server_address.as_deref().unwrap_or("not bound");
 
         let rule_count_text = format!("{} rules", state.rule_count);
 

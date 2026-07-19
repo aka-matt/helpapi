@@ -1,11 +1,11 @@
 //! Request list widget showing a table of recent requests.
 
 use ratatui::{
+    Frame,
     layout::Rect,
     style::{Color, Style},
     text::Line,
     widgets::{Block, Borders, Row, Table},
-    Frame,
 };
 
 use crate::tui::state::AppState;

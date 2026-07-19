@@ -127,7 +127,10 @@ impl AppState {
             RuntimeEvent::ConfigReloadFailed { message } => {
                 self.config_error = Some(message.clone());
             }
-            RuntimeEvent::RequestStarted { request_id, summary } => {
+            RuntimeEvent::RequestStarted {
+                request_id,
+                summary,
+            } => {
                 // Request started events are informational; we wait for completion
                 let record = RequestRecord::from_started(request_id, summary);
                 if self.requests.len() >= MAX_REQUESTS {
@@ -144,7 +147,10 @@ impl AppState {
                     }
                 }
             }
-            RuntimeEvent::RequestFailed { request_id, message: _ } => {
+            RuntimeEvent::RequestFailed {
+                request_id,
+                message: _,
+            } => {
                 // Find and update the matching request record with an error status
                 for record in self.requests.iter_mut() {
                     if record.request_id == *request_id {

@@ -7,7 +7,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 use mock_runtime::Runtime;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
 use tokio::sync::RwLock;
 
 /// Interval for polling runtime events (in milliseconds).
@@ -62,11 +62,16 @@ impl App {
         };
 
         // Run the async event loop using the current runtime
-        let res = tokio::runtime::Handle::current()
-            .block_on(self.run_loop(&mut terminal, &mut state, &mut event_receiver));
+        let res = tokio::runtime::Handle::current().block_on(self.run_loop(
+            &mut terminal,
+            &mut state,
+            &mut event_receiver,
+        ));
 
         // Main event loop
-        let res = self.run_loop(&mut terminal, &mut state, &mut event_receiver).await;
+        let res = self
+            .run_loop(&mut terminal, &mut state, &mut event_receiver)
+            .await;
 
         // Cleanup: restore terminal state
         let _ = crossterm::execute!(std::io::stderr(), DisableBracketedPaste);
@@ -89,9 +94,10 @@ impl App {
             }
 
             // Poll for runtime events
-            if let Ok(Some(event)) = event_receiver.recv_timeout(std::time::Duration::from_millis(
-                EVENT_POLL_INTERVAL_MS,
-            )).await {
+            if let Ok(Some(event)) = event_receiver
+                .recv_timeout(std::time::Duration::from_millis(EVENT_POLL_INTERVAL_MS))
+                .await
+            {
                 state.handle_event(&event);
             }
 
@@ -115,15 +121,11 @@ impl App {
     }
 
     /// Renders a single frame.
-    fn render_frame(
-        &self,
-        frame: &mut ratatui::Frame<'_>,
-        state: &crate::tui::state::AppState,
-    ) {
+    fn render_frame(&self, frame: &mut ratatui::Frame<'_>, state: &crate::tui::state::AppState) {
         use ratatui::layout::{Constraint, Direction, Layout};
-        use ratatui::text::{Line, Span};
         use ratatui::style::Color;
         use ratatui::style::Style;
+        use ratatui::text::{Line, Span};
 
         let size = frame.area();
 
@@ -183,11 +185,7 @@ impl App {
     }
 
     /// Handles a key event.
-    fn handle_key_event(
-        &self,
-        key_code: KeyCode,
-        state: &mut crate::tui::state::AppState,
-    ) {
+    fn handle_key_event(&self, key_code: KeyCode, state: &mut crate::tui::state::AppState) {
         // Handle filter input mode separately
         if state.filter_input_mode {
             self.handle_filter_input(key_code, state);
@@ -252,11 +250,7 @@ impl App {
     }
 
     /// Handles key events in filter input mode.
-    fn handle_filter_input(
-        &self,
-        key_code: KeyCode,
-        state: &mut crate::tui::state::AppState,
-    ) {
+    fn handle_filter_input(&self, key_code: KeyCode, state: &mut crate::tui::state::AppState) {
         match key_code {
             KeyCode::Enter => {
                 // Confirm filter and exit filter mode
