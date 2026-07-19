@@ -18,8 +18,16 @@ pub struct RequestRecord {
     pub method: String,
     /// Request path.
     pub path: String,
+    /// Request headers (lowercase keys).
+    pub request_headers: Vec<(String, String)>,
+    /// Request body (raw bytes).
+    pub request_body: Vec<u8>,
     /// Response status code.
     pub status: u16,
+    /// Response headers.
+    pub response_headers: Vec<(String, String)>,
+    /// Response body (raw bytes).
+    pub response_body: Vec<u8>,
     /// Latency in milliseconds.
     pub latency_ms: u64,
     /// ID of the matched rule, if any.
@@ -31,28 +39,31 @@ pub struct RequestRecord {
 }
 
 impl RequestRecord {
-    /// Creates a new RequestRecord from a completed request event.
-    pub fn from_event(
-        request_id: &str,
-        method: String,
-        path: String,
-        event: &RuntimeEvent,
-    ) -> Option<Self> {
-        match event {
-            RuntimeEvent::RequestCompleted { request_id: rid, result } if rid == request_id => {
-                Some(Self {
-                    timestamp: std::time::Instant::now(),
-                    method,
-                    path,
-                    status: result.status,
-                    latency_ms: result.elapsed_ms,
-                    rule_id: None,
-                    decision_type: result.decision_type,
-                    request_id: request_id.to_string(),
-                })
-            }
-            _ => None,
+    /// Creates a new RequestRecord from a request started event.
+    pub fn from_started(request_id: &str, summary: &mock_http::events::RequestSummary) -> Self {
+        Self {
+            timestamp: std::time::Instant::now(),
+            method: summary.method.clone(),
+            path: summary.path.clone(),
+            request_headers: summary.headers.clone(),
+            request_body: summary.body.clone(),
+            status: 0, // Will be updated on completion
+            response_headers: Vec::new(),
+            response_body: Vec::new(),
+            latency_ms: 0,
+            rule_id: summary.rule_id.clone(),
+            decision_type: DecisionType::Mock, // Default until updated
+            request_id: request_id.to_string(),
         }
+    }
+
+    /// Updates the record from a completed request event.
+    pub fn update_from_completed(&mut self, result: &mock_http::events::RequestResult) {
+        self.status = result.status;
+        self.latency_ms = result.elapsed_ms;
+        self.response_headers = result.headers.clone();
+        self.response_body = result.body.clone();
+        self.decision_type = result.decision_type;
     }
 }
 
@@ -73,6 +84,8 @@ pub struct AppState {
     pub active_panel: Panel,
     /// Filter string for the request list.
     pub filter: String,
+    /// Whether filter input mode is active.
+    pub filter_input_mode: bool,
     /// Configuration error message, if any.
     pub config_error: Option<String>,
     /// Whether the TUI should quit.
@@ -90,6 +103,7 @@ impl AppState {
             selected_request: None,
             active_panel: Panel::RequestList,
             filter: String::new(),
+            filter_input_mode: false,
             config_error: None,
             should_quit: false,
         }
@@ -115,16 +129,7 @@ impl AppState {
             }
             RuntimeEvent::RequestStarted { request_id, summary } => {
                 // Request started events are informational; we wait for completion
-                let record = RequestRecord {
-                    timestamp: std::time::Instant::now(),
-                    method: summary.method.clone(),
-                    path: summary.path.clone(),
-                    status: 0, // Will be updated on completion
-                    latency_ms: 0,
-                    rule_id: summary.rule_id.clone(),
-                    decision_type: DecisionType::Mock, // Default until updated
-                    request_id: request_id.clone(),
-                };
+                let record = RequestRecord::from_started(request_id, summary);
                 if self.requests.len() >= MAX_REQUESTS {
                     self.requests.pop_front();
                 }
@@ -134,9 +139,7 @@ impl AppState {
                 // Find and update the matching request record
                 for record in self.requests.iter_mut() {
                     if record.request_id == *request_id {
-                        record.status = result.status;
-                        record.latency_ms = result.elapsed_ms;
-                        record.decision_type = result.decision_type;
+                        record.update_from_completed(result);
                         break;
                     }
                 }
@@ -234,6 +237,7 @@ mod tests {
         assert!(state.selected_request.is_none());
         assert_eq!(state.active_panel, Panel::RequestList);
         assert!(state.filter.is_empty());
+        assert!(!state.filter_input_mode);
         assert!(state.config_error.is_none());
         assert!(!state.should_quit);
     }
@@ -260,7 +264,11 @@ mod tests {
             timestamp: std::time::Instant::now(),
             method: "GET".to_string(),
             path: "/test".to_string(),
+            request_headers: Vec::new(),
+            request_body: Vec::new(),
             status: 200,
+            response_headers: Vec::new(),
+            response_body: Vec::new(),
             latency_ms: 10,
             rule_id: None,
             decision_type: DecisionType::Mock,
@@ -278,7 +286,11 @@ mod tests {
             timestamp: std::time::Instant::now(),
             method: "GET".to_string(),
             path: "/test".to_string(),
+            request_headers: Vec::new(),
+            request_body: Vec::new(),
             status: 200,
+            response_headers: Vec::new(),
+            response_body: Vec::new(),
             latency_ms: 10,
             rule_id: None,
             decision_type: DecisionType::Mock,
@@ -297,7 +309,11 @@ mod tests {
             timestamp: std::time::Instant::now(),
             method: "GET".to_string(),
             path: "/test".to_string(),
+            request_headers: Vec::new(),
+            request_body: Vec::new(),
             status: 200,
+            response_headers: Vec::new(),
+            response_body: Vec::new(),
             latency_ms: 10,
             rule_id: None,
             decision_type: DecisionType::Mock,
@@ -314,7 +330,11 @@ mod tests {
             timestamp: std::time::Instant::now(),
             method: "GET".to_string(),
             path: "/test".to_string(),
+            request_headers: Vec::new(),
+            request_body: Vec::new(),
             status: 200,
+            response_headers: Vec::new(),
+            response_body: Vec::new(),
             latency_ms: 10,
             rule_id: None,
             decision_type: DecisionType::Mock,
@@ -324,7 +344,11 @@ mod tests {
             timestamp: std::time::Instant::now(),
             method: "POST".to_string(),
             path: "/other".to_string(),
+            request_headers: Vec::new(),
+            request_body: Vec::new(),
             status: 201,
+            response_headers: Vec::new(),
+            response_body: Vec::new(),
             latency_ms: 20,
             rule_id: None,
             decision_type: DecisionType::Mock,

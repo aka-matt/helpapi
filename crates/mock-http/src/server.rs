@@ -216,13 +216,27 @@ async fn handle_route(
     let request_id = gen_request_id();
     let method = request.method().to_string();
     let path = request.uri().path().to_string();
+    let headers = request.headers().clone();
 
-    // Emit RequestStarted event
+    // Convert headers to Vec for event emission
+    let headers_vec: Vec<(String, String)> = headers
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_lowercase(),
+                value.to_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+
+    // Emit RequestStarted event (body will be added after reading)
     if let Some(ref tx) = events_tx {
         let summary = RequestSummary {
             method: method.clone(),
             path: path.clone(),
-            rule_id: None, // Will be filled in after decision
+            headers: headers_vec.clone(),
+            body: Vec::new(), // Will be filled in after reading body
+            rule_id: None,   // Will be filled in after decision
             upstream_url: None,
         };
         let _ = tx
@@ -234,7 +248,7 @@ async fn handle_route(
     }
 
     match handle_request(request, engine, max_body_bytes).await {
-        Ok((response, decision)) => {
+        Ok((response, decision, _request_headers, _request_body)) => {
             debug!("handler returned success response");
 
             // Determine decision type
@@ -248,6 +262,8 @@ async fn handle_route(
             if let Some(ref tx) = events_tx {
                 let result = RequestResult {
                     status: response.status().as_u16(),
+                    headers: Vec::new(),
+                    body: Vec::new(),
                     elapsed_ms: start_time.elapsed().as_millis() as u64,
                     decision_type,
                 };

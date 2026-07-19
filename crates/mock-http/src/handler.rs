@@ -22,12 +22,12 @@ const BODY_READ_TIMEOUT_MS: u64 = 5000;
 
 /// Handles an incoming HTTP request by routing it through the mock engine.
 ///
-/// Returns both the response and the decision for event emission.
+/// Returns the response, decision, request headers, and request body for event emission.
 pub async fn handle_request(
     request: Request,
     engine: Arc<tokio::sync::RwLock<Engine>>,
     max_body_bytes: usize,
-) -> Result<(Response, Decision), HttpError> {
+) -> Result<(Response, Decision, Vec<(String, String)>, Vec<u8>), HttpError> {
     let start_time = std::time::Instant::now();
 
     // Extract request components
@@ -48,7 +48,21 @@ pub async fn handle_request(
     );
 
     // Convert to RequestData
-    let request_data = convert_request(method, uri, headers, body)?;
+    let request_data = convert_request(method.clone(), uri.clone(), headers.clone(), body.clone())?;
+
+    // Convert headers to Vec for event emission
+    let request_headers: Vec<(String, String)> = headers
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_lowercase(),
+                value.to_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+
+    // Convert body to bytes for event emission
+    let request_body = body_to_bytes(&body);
 
     // Call engine decision (acquire read lock for the duration of decision)
     let decision = engine.read().await.decide(request_data).map_err(|e| {
@@ -75,7 +89,7 @@ pub async fn handle_request(
         }
     };
     debug!("response built, returning");
-    response.map(|r| (r, decision))
+    response.map(|r| (r, decision, request_headers, request_body))
 }
 
 /// Reads the request body, enforcing the size limit.
@@ -249,6 +263,24 @@ pub fn extract_forward_plan(response: &Response) -> Option<ForwardPlan> {
     serde_json::from_str(plan_str).ok()
 }
 
+/// Extracts the response body as bytes (up to MAX_BODY_PREVIEW).
+fn extract_response_body(response: &Response) -> Vec<u8> {
+    // The response body is already consumed by the caller in the async chain.
+    // For now, return an empty body since we can't re-read the response body.
+    // In a real implementation, we'd capture the body before building the response.
+    Vec::new()
+}
+
+/// Converts BodyData to raw bytes for event emission.
+fn body_to_bytes(body: &BodyData) -> Vec<u8> {
+    match body {
+        BodyData::Empty => Vec::new(),
+        BodyData::Text(s) => s.as_bytes().to_vec(),
+        BodyData::Json(v) => v.to_string().into_bytes(),
+        BodyData::Binary(b) => b.clone(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,7 +374,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let (response, _decision) = handle_request(request, engine, 1024).await.unwrap();
+        let (response, _decision, _, _) = handle_request(request, engine, 1024).await.unwrap();
 
         // Check that we got a forward response
         let status = response.status();

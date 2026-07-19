@@ -55,6 +55,10 @@ pub struct RequestSummary {
     pub method: String,
     /// Request path.
     pub path: String,
+    /// Request headers (lowercase keys).
+    pub headers: Vec<(String, String)>,
+    /// Request body (raw bytes, up to MAX_BODY_PREVIEW).
+    pub body: Vec<u8>,
     /// ID of the matched rule, if any.
     pub rule_id: Option<String>,
     /// Upstream URL for forward decisions, if known.
@@ -66,6 +70,10 @@ pub struct RequestSummary {
 pub struct RequestResult {
     /// HTTP status code of the response.
     pub status: u16,
+    /// Response headers.
+    pub headers: Vec<(String, String)>,
+    /// Response body (raw bytes, up to MAX_BODY_PREVIEW).
+    pub body: Vec<u8>,
     /// Time taken to process the request in milliseconds.
     pub elapsed_ms: u64,
     /// Type of decision that was made.

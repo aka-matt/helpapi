@@ -188,6 +188,12 @@ impl App {
         key_code: KeyCode,
         state: &mut crate::tui::state::AppState,
     ) {
+        // Handle filter input mode separately
+        if state.filter_input_mode {
+            self.handle_filter_input(key_code, state);
+            return;
+        }
+
         match key_code {
             KeyCode::Char('q') | KeyCode::Char('Q') => {
                 state.should_quit = true;
@@ -215,8 +221,9 @@ impl App {
                 state.select_previous();
             }
             KeyCode::Char('/') => {
-                // TODO: Enter filter input mode
-                // For now, just set a placeholder filter
+                // Enter filter input mode
+                state.filter_input_mode = true;
+                state.filter.clear();
             }
             KeyCode::Tab => {
                 // Cycle through panels
@@ -241,6 +248,37 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Handles key events in filter input mode.
+    fn handle_filter_input(
+        &self,
+        key_code: KeyCode,
+        state: &mut crate::tui::state::AppState,
+    ) {
+        match key_code {
+            KeyCode::Enter => {
+                // Confirm filter and exit filter mode
+                state.filter_input_mode = false;
+            }
+            KeyCode::Esc => {
+                // Cancel filter input and exit filter mode
+                state.filter.clear();
+                state.filter_input_mode = false;
+            }
+            KeyCode::Backspace => {
+                // Remove last character from filter
+                state.filter.pop();
+            }
+            KeyCode::Char(c) => {
+                // Add character to filter
+                state.filter.push(c);
+            }
+            _ => {
+                // Any other key exits filter mode
+                state.filter_input_mode = false;
+            }
         }
     }
 }
