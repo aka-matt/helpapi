@@ -1,6 +1,7 @@
 //! CLI entry point for mock-api.
 
 mod commands;
+mod tui;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -35,6 +36,9 @@ enum Commands {
         /// Log format (pretty or json).
         #[arg(long, default_value = "pretty")]
         log_format: commands::run::LogFormat,
+        /// Run mode (standard or tui).
+        #[arg(long, default_value = "standard")]
+        mode: commands::run::RunMode,
     },
     /// Generate a JSON schema for configuration files.
     Schema {
@@ -76,7 +80,7 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Commands::Run { config, log_format } => {
+        Commands::Run { config, log_format, mode } => {
             use commands::run::RunCommand;
 
             let config_path = match config {
@@ -87,7 +91,7 @@ fn main() -> ExitCode {
                 }
             };
 
-            let cmd = RunCommand::new(config_path, log_format);
+            let cmd = RunCommand::new(config_path, log_format).with_run_mode(mode);
             cmd.run()
         }
         Commands::Schema { output } => {

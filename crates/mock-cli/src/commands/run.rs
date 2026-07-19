@@ -33,12 +33,36 @@ impl std::str::FromStr for LogFormat {
     }
 }
 
+/// Run mode option.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum RunMode {
+    /// Standard logging mode (default).
+    #[default]
+    Standard,
+    /// TUI mode with interactive terminal UI.
+    Tui,
+}
+
+impl std::str::FromStr for RunMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "standard" => Ok(RunMode::Standard),
+            "tui" => Ok(RunMode::Tui),
+            _ => Err(format!("unknown run mode: {}", s)),
+        }
+    }
+}
+
 /// Run command implementation.
 pub struct RunCommand {
     /// Path to the configuration file.
     config_path: PathBuf,
     /// Log format.
     log_format: LogFormat,
+    /// Run mode (standard or TUI).
+    run_mode: RunMode,
 }
 
 impl RunCommand {
@@ -47,7 +71,14 @@ impl RunCommand {
         Self {
             config_path,
             log_format,
+            run_mode: RunMode::Standard,
         }
+    }
+
+    /// Sets the run mode.
+    pub fn with_run_mode(mut self, mode: RunMode) -> Self {
+        self.run_mode = mode;
+        self
     }
 
     /// Initializes the tracing subscriber based on log format and RUST_LOG env var.
@@ -174,6 +205,7 @@ impl RunCommand {
             let watcher = RunCommand {
                 config_path: watcher_config,
                 log_format: LogFormat::Pretty, // Use pretty for watcher
+                run_mode: RunMode::Standard,
             };
             if let Err(e) = watcher.watch_config(watcher_runtime).await {
                 warn!("file watcher error: {}", e);
@@ -207,6 +239,64 @@ impl RunCommand {
         info!("server stopped");
         Ok(())
     }
+
+    /// Runs the server with TUI until shutdown.
+    async fn run_server_tui(&self) -> Result<()> {
+        // For TUI mode, we don't initialize standard tracing as the TUI takes over stderr
+        let content = self.read_config()?;
+
+        info!(
+            "starting mock-api server with TUI and config: {}",
+            self.config_path.display()
+        );
+
+        let runtime = Arc::new(RwLock::new(
+            mock_runtime::Runtime::new(&content)
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to create runtime: {}", e))?,
+        ));
+
+        {
+            let mut runtime = runtime.write().await;
+            runtime
+                .start()
+                .await
+                .map_err(|e| anyhow::anyhow!("failed to start runtime: {}", e))?;
+        }
+
+        // Create and run the TUI app
+        let tui_app = crate::tui::App::new(runtime.clone(), self.config_path.clone());
+
+        // Spawn file watcher in background
+        let watcher_runtime = runtime.clone();
+        let watcher_config = self.config_path.clone();
+        let _watcher_handle = tokio::spawn(async move {
+            let watcher = RunCommand {
+                config_path: watcher_config,
+                log_format: LogFormat::Pretty,
+                run_mode: RunMode::Tui,
+            };
+            if let Err(e) = watcher.watch_config(watcher_runtime).await {
+                warn!("file watcher error: {}", e);
+            }
+        });
+
+        // Run the TUI (this blocks until quit)
+        if let Err(e) = tui_app.run().await {
+            error!("TUI error: {}", e);
+        }
+
+        // Stop the runtime
+        {
+            let mut runtime = runtime.write().await;
+            if let Err(e) = runtime.stop().await {
+                error!("error stopping runtime: {}", e);
+            }
+        }
+
+        info!("server stopped");
+        Ok(())
+    }
 }
 
 impl Command for RunCommand {
@@ -223,7 +313,12 @@ impl Command for RunCommand {
 
         let rt = rt.unwrap();
 
-        if let Err(e) = rt.block_on(self.run_server()) {
+        let res = match self.run_mode {
+            RunMode::Standard => rt.block_on(self.run_server()),
+            RunMode::Tui => rt.block_on(self.run_server_tui()),
+        };
+
+        if let Err(e) = res {
             eprintln!("Error: {}", e);
             return ExitCode::from(1);
         }
@@ -260,6 +355,16 @@ mod tests {
         ));
         assert!(matches!("json".parse::<LogFormat>(), Ok(LogFormat::Json)));
         assert!("unknown".parse::<LogFormat>().is_err());
+    }
+
+    #[test]
+    fn test_run_mode_parsing() {
+        assert!(matches!(
+            "standard".parse::<RunMode>(),
+            Ok(RunMode::Standard)
+        ));
+        assert!(matches!("tui".parse::<RunMode>(), Ok(RunMode::Tui)));
+        assert!("unknown".parse::<RunMode>().is_err());
     }
 
     #[test]
