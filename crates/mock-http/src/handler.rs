@@ -21,11 +21,13 @@ use crate::error::HttpError;
 const BODY_READ_TIMEOUT_MS: u64 = 5000;
 
 /// Handles an incoming HTTP request by routing it through the mock engine.
+///
+/// Returns both the response and the decision for event emission.
 pub async fn handle_request(
     request: Request,
     engine: Arc<Engine>,
     max_body_bytes: usize,
-) -> Result<Response, HttpError> {
+) -> Result<(Response, Decision), HttpError> {
     let start_time = std::time::Instant::now();
 
     // Extract request components
@@ -73,7 +75,7 @@ pub async fn handle_request(
         }
     };
     debug!("response built, returning");
-    response
+    response.map(|r| (r, decision))
 }
 
 /// Reads the request body, enforcing the size limit.
@@ -340,7 +342,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let response = handle_request(request, engine, 1024).await.unwrap();
+        let (response, _decision) = handle_request(request, engine, 1024).await.unwrap();
 
         // Check that we got a forward response
         let status = response.status();

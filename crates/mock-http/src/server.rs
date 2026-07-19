@@ -2,9 +2,10 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::{Router, body::Body, extract::Request, response::Response, routing::any};
-use mock_core::Engine;
+use mock_core::{Decision, Engine};
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio::sync::mpsc;
@@ -15,6 +16,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 
 use crate::error::HttpError;
+use crate::events::{DecisionType, RequestResult, RequestSummary, RuntimeEvent};
 use crate::handler::handle_request;
 
 /// Configuration for the HTTP server.
@@ -74,6 +76,8 @@ pub struct HttpServer {
     addr: SocketAddr,
     /// Channel to signal shutdown.
     shutdown_tx: oneshot::Sender<()>,
+    /// Event channel sender for runtime events.
+    events_tx: Option<mpsc::Sender<RuntimeEvent>>,
     /// Join handle for the server task.
     _join_handle: tokio::task::JoinHandle<()>,
 }
@@ -90,7 +94,7 @@ impl HttpServer {
     pub async fn start_server(
         config: ServerConfig,
         engine: Arc<Engine>,
-        _events: Option<mpsc::Sender<()>>,
+        events: Option<mpsc::Sender<RuntimeEvent>>,
     ) -> Result<Self, HttpError> {
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
 
@@ -125,7 +129,18 @@ impl HttpServer {
             .with_state(AppState {
                 engine,
                 config: config.clone(),
+                events_tx: events.clone(),
             });
+
+        // Emit ServerStarted event
+        if let Some(ref tx) = events {
+            let _ = tx.send(RuntimeEvent::ServerStarted {
+                address: addr.to_string(),
+            }).await;
+        }
+
+        // Clone events for the shutdown handler
+        let events_for_shutdown = events.clone();
 
         // Spawn server task
         let join_handle = tokio::spawn(async move {
@@ -141,11 +156,17 @@ impl HttpServer {
                     info!("server shutdown signal received");
                 }
             }
+
+            // Emit ServerStopped event
+            if let Some(tx) = events_for_shutdown {
+                let _ = tx.send(RuntimeEvent::ServerStopped).await;
+            }
         });
 
         Ok(Self {
             addr,
             shutdown_tx,
+            events_tx: events,
             _join_handle: join_handle,
         })
     }
@@ -170,6 +191,7 @@ impl HttpServer {
 struct AppState {
     engine: Arc<Engine>,
     config: ServerConfig,
+    events_tx: Option<mpsc::Sender<RuntimeEvent>>,
 }
 
 /// Request handler that routes through the mock engine.
@@ -179,14 +201,65 @@ async fn handle_route(
 ) -> Response {
     let engine = state.engine.clone();
     let max_body_bytes = state.config.max_body_bytes;
+    let events_tx = state.events_tx.clone();
+    let start_time = Instant::now();
+
+    // Generate request ID and extract summary info for event
+    let request_id = uuid_v4();
+    let method = request.method().to_string();
+    let path = request.uri().path().to_string();
+
+    // Emit RequestStarted event
+    if let Some(ref tx) = events_tx {
+        let summary = RequestSummary {
+            method: method.clone(),
+            path: path.clone(),
+            rule_id: None, // Will be filled in after decision
+            upstream_url: None,
+        };
+        let _ = tx.send(RuntimeEvent::RequestStarted {
+            request_id: request_id.clone(),
+            summary,
+        }).await;
+    }
 
     match handle_request(request, engine, max_body_bytes).await {
-        Ok(response) => {
+        Ok((response, decision)) => {
             debug!("handler returned success response");
+
+            // Determine decision type
+            let decision_type = match &decision {
+                Decision::Mock { .. } => DecisionType::Mock,
+                Decision::Forward { .. } => DecisionType::Forward,
+                Decision::Reject { .. } => DecisionType::Reject,
+            };
+
+            // Emit RequestCompleted event
+            if let Some(ref tx) = events_tx {
+                let result = RequestResult {
+                    status: response.status().as_u16(),
+                    elapsed_ms: start_time.elapsed().as_millis() as u64,
+                    decision_type,
+                };
+                let _ = tx.send(RuntimeEvent::RequestCompleted {
+                    request_id,
+                    result,
+                }).await;
+            }
+
             response
         }
         Err(e) => {
             error!("request handling error: {:?} - {}", e, e);
+
+            // Emit RequestFailed event
+            if let Some(ref tx) = events_tx {
+                let _ = tx.send(RuntimeEvent::RequestFailed {
+                    request_id,
+                    message: e.to_string(),
+                }).await;
+            }
+
             // Map error to appropriate HTTP status code
             let status = match e {
                 HttpError::BodyTooLarge { .. } => axum::http::StatusCode::PAYLOAD_TOO_LARGE,
@@ -208,6 +281,24 @@ async fn handle_route(
     }
 }
 
+/// Generates a simple UUID-like request ID for event tracking.
+fn uuid_v4() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let random: u64 = rand_simple();
+    format!("{:x}-{:x}", timestamp, random)
+}
+
+/// Simple pseudo-random number generator (for request IDs).
+fn rand_simple() -> u64 {
+    use std::collections::hash_map::RandomState;
+    use std::hash::{BuildHasher, Hasher};
+    RandomState::new().build_hasher().finish()
+}
+
 /// Runs the HTTP server with graceful shutdown handling.
 ///
 /// This function sets up signal handlers for SIGINT and SIGTERM, and blocks
@@ -215,7 +306,7 @@ async fn handle_route(
 pub async fn run_server_with_shutdown(
     config: ServerConfig,
     engine: Arc<Engine>,
-    events: Option<mpsc::Sender<()>>,
+    events: Option<mpsc::Sender<RuntimeEvent>>,
 ) -> Result<(), HttpError> {
     let server = HttpServer::start_server(config, engine, events).await?;
 
