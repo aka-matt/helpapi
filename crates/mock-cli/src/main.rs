@@ -6,11 +6,13 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use commands::Command;
+
 #[derive(Parser, Debug)]
 #[command(
     name = "mock-api",
     about = "A mock API CLI tool with WASM export capability",
-    version = "0.1.0"
+    version
 )]
 struct Cli {
     #[command(subcommand)]
@@ -30,6 +32,9 @@ enum Commands {
         /// Path to the configuration file.
         #[arg(short, long)]
         config: Option<PathBuf>,
+        /// Log format (pretty or json).
+        #[arg(long, default_value = "pretty")]
+        log_format: commands::run::LogFormat,
     },
     /// Generate a JSON schema for configuration files.
     Schema {
@@ -71,26 +76,34 @@ fn main() -> ExitCode {
                 }
             }
         }
-        Commands::Run { config: _ } => {
-            println!("Run command not yet implemented");
-            ExitCode::SUCCESS
+        Commands::Run { config, log_format } => {
+            use commands::run::RunCommand;
+
+            let config_path = match config {
+                Some(p) => p,
+                None => {
+                    eprintln!("Error: --config is required for run command");
+                    return ExitCode::from(1);
+                }
+            };
+
+            let cmd = RunCommand::new(config_path, log_format);
+            cmd.run()
         }
         Commands::Schema { output } => {
-            let schema = mock_config::generate_schema();
-            let json = serde_json::to_string_pretty(&schema).unwrap();
-            if let Some(path) = output {
-                std::fs::write(&path, &json).unwrap();
-            } else {
-                println!("{}", json);
-            }
-            ExitCode::SUCCESS
+            use commands::schema::SchemaCommand;
+
+            let cmd = SchemaCommand::new(output);
+            cmd.run()
         }
-        Commands::PrintEffectiveConfig { config: _ } => {
-            println!("PrintEffectiveConfig command not yet implemented");
-            ExitCode::SUCCESS
+        Commands::PrintEffectiveConfig { config } => {
+            use commands::print_config::PrintEffectiveConfigCommand;
+
+            let cmd = PrintEffectiveConfigCommand::new(config);
+            cmd.run()
         }
         Commands::Version => {
-            println!("mock-api version 0.1.0");
+            println!("mock-api version {}", env!("CARGO_PKG_VERSION"));
             ExitCode::SUCCESS
         }
     }

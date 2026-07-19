@@ -1,5 +1,8 @@
 //! CLI commands module.
 
+pub mod print_config;
+pub mod run;
+pub mod schema;
 pub mod validate;
 
 use std::process::ExitCode;
