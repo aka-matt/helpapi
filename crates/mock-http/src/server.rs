@@ -8,8 +8,8 @@ use axum::{Router, body::Body, extract::Request, response::Response, routing::an
 use mock_core::{Decision, Engine};
 use tokio::net::TcpListener;
 use tokio::signal;
-use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::{RwLock, mpsc};
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
@@ -80,6 +80,8 @@ pub struct HttpServer {
     events_tx: Option<mpsc::Sender<RuntimeEvent>>,
     /// Join handle for the server task.
     _join_handle: tokio::task::JoinHandle<()>,
+    /// Engine reference for hot reload.
+    engine: Arc<RwLock<Engine>>,
 }
 
 impl HttpServer {
@@ -88,12 +90,15 @@ impl HttpServer {
     /// Returns the server instance and the actual address bound (which may differ
     /// from the requested address if port 0 was used).
     ///
+    /// The engine is stored behind an `Arc<RwLock<Engine>>` to support hot reload —
+    /// on each request, the current engine is read from the lock.
+    ///
     /// # Errors
     ///
     /// Returns [`HttpError::BindError`] if the server fails to bind to the address.
     pub async fn start_server(
         config: ServerConfig,
-        engine: Arc<Engine>,
+        engine: Arc<RwLock<Engine>>,
         events: Option<mpsc::Sender<RuntimeEvent>>,
     ) -> Result<Self, HttpError> {
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
@@ -127,16 +132,18 @@ impl HttpServer {
                     .into_inner(),
             )
             .with_state(AppState {
-                engine,
+                engine: engine.clone(),
                 config: config.clone(),
                 events_tx: events.clone(),
             });
 
         // Emit ServerStarted event
         if let Some(ref tx) = events {
-            let _ = tx.send(RuntimeEvent::ServerStarted {
-                address: addr.to_string(),
-            }).await;
+            let _ = tx
+                .send(RuntimeEvent::ServerStarted {
+                    address: addr.to_string(),
+                })
+                .await;
         }
 
         // Clone events for the shutdown handler
@@ -168,6 +175,7 @@ impl HttpServer {
             shutdown_tx,
             events_tx: events,
             _join_handle: join_handle,
+            engine,
         })
     }
 
@@ -189,7 +197,7 @@ impl HttpServer {
 /// Application state shared across request handlers.
 #[derive(Clone)]
 struct AppState {
-    engine: Arc<Engine>,
+    engine: Arc<RwLock<Engine>>,
     config: ServerConfig,
     events_tx: Option<mpsc::Sender<RuntimeEvent>>,
 }
@@ -217,10 +225,12 @@ async fn handle_route(
             rule_id: None, // Will be filled in after decision
             upstream_url: None,
         };
-        let _ = tx.send(RuntimeEvent::RequestStarted {
-            request_id: request_id.clone(),
-            summary,
-        }).await;
+        let _ = tx
+            .send(RuntimeEvent::RequestStarted {
+                request_id: request_id.clone(),
+                summary,
+            })
+            .await;
     }
 
     match handle_request(request, engine, max_body_bytes).await {
@@ -241,10 +251,9 @@ async fn handle_route(
                     elapsed_ms: start_time.elapsed().as_millis() as u64,
                     decision_type,
                 };
-                let _ = tx.send(RuntimeEvent::RequestCompleted {
-                    request_id,
-                    result,
-                }).await;
+                let _ = tx
+                    .send(RuntimeEvent::RequestCompleted { request_id, result })
+                    .await;
             }
 
             response
@@ -254,10 +263,12 @@ async fn handle_route(
 
             // Emit RequestFailed event
             if let Some(ref tx) = events_tx {
-                let _ = tx.send(RuntimeEvent::RequestFailed {
-                    request_id,
-                    message: e.to_string(),
-                }).await;
+                let _ = tx
+                    .send(RuntimeEvent::RequestFailed {
+                        request_id,
+                        message: e.to_string(),
+                    })
+                    .await;
             }
 
             // Map error to appropriate HTTP status code
@@ -267,16 +278,17 @@ async fn handle_route(
             };
             let body_msg = match e {
                 HttpError::BodyTooLarge { size, limit } => {
-                    format!("Request body too large: {} bytes exceeds limit of {} bytes", size, limit)
+                    format!(
+                        "Request body too large: {} bytes exceeds limit of {} bytes",
+                        size, limit
+                    )
                 }
                 _ => "Internal server error".to_string(),
             };
             axum::response::Response::builder()
                 .status(status)
                 .body(Body::from(body_msg))
-                .unwrap_or_else(|_| {
-                    axum::response::Response::new(Body::from("Error"))
-                })
+                .unwrap_or_else(|_| axum::response::Response::new(Body::from("Error")))
         }
     }
 }
@@ -305,7 +317,7 @@ fn rand_simple() -> u64 {
 /// until a shutdown signal is received or the server fails.
 pub async fn run_server_with_shutdown(
     config: ServerConfig,
-    engine: Arc<Engine>,
+    engine: Arc<RwLock<Engine>>,
     events: Option<mpsc::Sender<RuntimeEvent>>,
 ) -> Result<(), HttpError> {
     let server = HttpServer::start_server(config, engine, events).await?;
@@ -341,7 +353,7 @@ mod tests {
     use super::*;
     use mock_core::Engine;
 
-    fn test_engine() -> Arc<Engine> {
+    fn test_engine() -> Arc<RwLock<Engine>> {
         let json = r#"{
             "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
             "routes": [{
@@ -351,7 +363,7 @@ mod tests {
                 "action": {"type": "mock", "response": {"status": 200, "json_body": {"id": 1}}}
             }]
         }"#;
-        Arc::new(Engine::compile(json).unwrap())
+        Arc::new(RwLock::new(Engine::compile(json).unwrap()))
     }
 
     #[tokio::test]
@@ -380,7 +392,9 @@ mod tests {
         let config = ServerConfig::new("127.0.0.1", 0); // Port 0 = dynamic
         let engine = test_engine();
 
-        let server = HttpServer::start_server(config, engine, None).await.unwrap();
+        let server = HttpServer::start_server(config, engine, None)
+            .await
+            .unwrap();
 
         // Verify it bound to some port
         assert!(server.local_addr().port() > 0);
@@ -395,7 +409,9 @@ mod tests {
         let config = ServerConfig::new("127.0.0.1", 0);
         let engine = test_engine();
 
-        let server = HttpServer::start_server(config, engine, None).await.unwrap();
+        let server = HttpServer::start_server(config, engine, None)
+            .await
+            .unwrap();
         let addr = server.local_addr();
 
         // Make a request to verify server is running

@@ -25,7 +25,7 @@ const BODY_READ_TIMEOUT_MS: u64 = 5000;
 /// Returns both the response and the decision for event emission.
 pub async fn handle_request(
     request: Request,
-    engine: Arc<Engine>,
+    engine: Arc<tokio::sync::RwLock<Engine>>,
     max_body_bytes: usize,
 ) -> Result<(Response, Decision), HttpError> {
     let start_time = std::time::Instant::now();
@@ -50,8 +50,8 @@ pub async fn handle_request(
     // Convert to RequestData
     let request_data = convert_request(method, uri, headers, body)?;
 
-    // Call engine decision
-    let decision = engine.decide(request_data).map_err(|e| {
+    // Call engine decision (acquire read lock for the duration of decision)
+    let decision = engine.read().await.decide(request_data).map_err(|e| {
         error!("engine.decide() failed: {}", e);
         HttpError::ServerStopped(e.to_string())
     })?;
@@ -333,7 +333,7 @@ mod tests {
                 "action": {"type": "forward", "upstream": "https://api.example.com"}
             }]
         }"#;
-        let engine = Arc::new(Engine::compile(json).unwrap());
+        let engine = Arc::new(tokio::sync::RwLock::new(Engine::compile(json).unwrap()));
 
         // Create a simple request
         let request = Request::builder()

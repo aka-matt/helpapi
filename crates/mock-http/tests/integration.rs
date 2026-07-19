@@ -8,7 +8,7 @@ use mock_core::Engine;
 use mock_http::{HttpServer, ServerConfig};
 
 /// Creates an engine with a simple mock route.
-fn test_engine() -> Arc<Engine> {
+fn test_engine() -> Arc<tokio::sync::RwLock<Engine>> {
     let json = r#"{
         "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
         "routes": [{
@@ -23,7 +23,7 @@ fn test_engine() -> Arc<Engine> {
             "action": {"type": "mock", "response": {"status": 200, "json_body": [{"id": 1}, {"id": 2}]}}
         }]
     }"#;
-    Arc::new(Engine::compile(json).unwrap())
+    Arc::new(tokio::sync::RwLock::new(Engine::compile(json).unwrap()))
 }
 
 #[tokio::test]
@@ -31,7 +31,9 @@ async fn test_mock_route_returns_json_response() {
     let config = ServerConfig::new("127.0.0.1", 0);
     let engine = test_engine();
 
-    let server = HttpServer::start_server(config, engine, None).await.unwrap();
+    let server = HttpServer::start_server(config, engine, None)
+        .await
+        .unwrap();
     let addr = server.local_addr();
 
     let client = reqwest::Client::new();
@@ -56,7 +58,9 @@ async fn test_unmatched_route_returns_404() {
     let config = ServerConfig::new("127.0.0.1", 0);
     let engine = test_engine();
 
-    let server = HttpServer::start_server(config, engine, None).await.unwrap();
+    let server = HttpServer::start_server(config, engine, None)
+        .await
+        .unwrap();
     let addr = server.local_addr();
 
     let client = reqwest::Client::new();
@@ -84,10 +88,12 @@ async fn test_priority_ordering() {
                 "action": {"type": "mock", "response": {"status": 200, "json_body": {"priority": 100}}}}
         ]
     }"#;
-    let engine = Arc::new(Engine::compile(json).unwrap());
+    let engine = Arc::new(tokio::sync::RwLock::new(Engine::compile(json).unwrap()));
 
     let config = ServerConfig::new("127.0.0.1", 0);
-    let server = HttpServer::start_server(config, engine, None).await.unwrap();
+    let server = HttpServer::start_server(config, engine, None)
+        .await
+        .unwrap();
     let addr = server.local_addr();
 
     let client = reqwest::Client::new();
@@ -117,10 +123,12 @@ async fn test_post_request_with_json_body() {
             "action": {"type": "mock", "response": {"status": 200, "json_body": {"received": true}}}
         }]
     }"#;
-    let engine = Arc::new(Engine::compile(json).unwrap());
+    let engine = Arc::new(tokio::sync::RwLock::new(Engine::compile(json).unwrap()));
 
     let config = ServerConfig::new("127.0.0.1", 0);
-    let server = HttpServer::start_server(config, engine, None).await.unwrap();
+    let server = HttpServer::start_server(config, engine, None)
+        .await
+        .unwrap();
     let addr = server.local_addr();
 
     let client = reqwest::Client::new();
