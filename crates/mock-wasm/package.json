@@ -1,0 +1,25 @@
+{
+  "name": "helpapi-mock-wasm",
+  "version": "0.1.0",
+  "description": "WASM bindings for the HelpAPI mock engine",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HelpAPI/helpapi"
+  },
+  "files": [
+    "pkg/"
+  ],
+  "main": "pkg/helpapi_mock_wasm.js",
+  "types": "pkg/helpapi_mock_wasm.d.ts",
+  "scripts": {
+    "build": "wasm-pack build --target bundler",
+    "build:node": "wasm-pack build --target nodejs",
+    "build:web": "wasm-pack build --target web",
+    "test": "wasm-pack test --node",
+    "prepublishOnly": "wasm-pack build --target bundler"
+  },
+  "devDependencies": {
+    "wasm-pack": "^0.12.0"
+  }
+}
