@@ -148,6 +148,83 @@ async fn test_post_request_with_json_body() {
 }
 
 // Note: Forward route testing is covered by the unit test
-// handler::tests::test_handle_request_forward_decision which passes correctly.
-// The integration test for forward routes had issues with Axum routing
-// that are specific to the test setup - the core functionality works.
+// handler::tests::test_handle_route_forward_returns_upstream_response_or_502.
+// These integration tests drive a real round-trip through HttpServer::start_server.
+
+#[tokio::test]
+async fn test_forward_round_trip_via_handle_route() {
+    // Bind a tiny upstream
+    let upstream = axum::Router::new().route(
+        "/",
+        axum::routing::any(|| async {
+            axum::http::Response::builder()
+                .status(200)
+                .body(axum::body::Body::from("ok-from-upstream"))
+                .unwrap()
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = listener.local_addr().unwrap();
+    let upstream_url = format!("http://{}/", upstream_addr);
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, upstream).await;
+    });
+
+    let cfg = format!(
+        r#"{{
+            "defaults": {{ "upstream_timeout_ms": 5000, "max_body_bytes": 1048576 }},
+            "routes": [{{
+                "id": "proxy", "priority": 100,
+                "match_rule": {{ "method": "GET", "path": "/proxy" }},
+                "action": {{ "type": "forward", "upstream": "{}" }}
+            }}]
+        }}"#,
+        upstream_url
+    );
+
+    let server = HttpServer::start_server(
+        ServerConfig::new("127.0.0.1", 0),
+        Arc::new(tokio::sync::RwLock::new(Engine::compile(&cfg).unwrap())),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("http://{}/proxy", server.local_addr()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.text().await.unwrap(), "ok-from-upstream");
+
+    server.shutdown();
+}
+
+#[tokio::test]
+async fn test_forward_returns_502_when_upstream_unreachable() {
+    let cfg = r#"{
+        "defaults": { "upstream_timeout_ms": 1000, "max_body_bytes": 1048576 },
+        "routes": [{
+            "id": "dead", "priority": 100,
+            "match_rule": { "method": "GET", "path": "/x" },
+            "action": { "type": "forward", "upstream": "http://127.0.0.1:1/" }
+        }]
+    }"#;
+    let server = HttpServer::start_server(
+        ServerConfig::new("127.0.0.1", 0),
+        Arc::new(tokio::sync::RwLock::new(Engine::compile(cfg).unwrap())),
+        None,
+    )
+    .await
+    .unwrap();
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("http://{}/x", server.local_addr()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 502);
+    server.shutdown();
+}

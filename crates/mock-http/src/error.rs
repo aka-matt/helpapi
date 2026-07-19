@@ -37,6 +37,29 @@ pub enum HttpError {
     /// Shutdown timeout expired while draining in-flight requests.
     #[error("shutdown timed out waiting for in-flight requests to complete")]
     ShutdownTimeout,
+
+    /// Upstream forwarding failed.
+    #[error("upstream failed: {reason}")]
+    UpstreamFailed { reason: String },
+
+    /// The upstream response exceeded the configured limit.
+    #[error("upstream response too large: {size} bytes exceeds limit of {limit} bytes")]
+    ResponseTooLarge { size: usize, limit: usize },
+}
+
+impl From<UpstreamError> for HttpError {
+    fn from(e: UpstreamError) -> Self {
+        let reason = match &e {
+            UpstreamError::Timeout { timeout_ms } => format!("timeout after {}ms", timeout_ms),
+            UpstreamError::ConnectionError(_) => "connection error".to_string(),
+            UpstreamError::UpstreamStatus { status, reason: _ } => {
+                format!("upstream returned status {}", status)
+            }
+            UpstreamError::InvalidResponse(s) => format!("invalid response: {}", s),
+            UpstreamError::InvalidUrl(s) => format!("invalid upstream url: {}", s),
+        };
+        HttpError::UpstreamFailed { reason }
+    }
 }
 
 /// Errors from upstream forwarding.

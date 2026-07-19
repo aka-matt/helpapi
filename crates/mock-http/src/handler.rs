@@ -11,7 +11,7 @@ use axum::{
 use bytes::Bytes;
 use http_body::Body as HttpBody;
 use http_body_util::BodyExt;
-use mock_core::{BodyData, Decision, Engine, ForwardPlan, RequestData, ResponseData};
+use mock_core::{BodyData, Decision, Engine, RequestData, ResponseData};
 use tokio::time::timeout;
 use tracing::{debug, error};
 
@@ -22,12 +22,16 @@ const BODY_READ_TIMEOUT_MS: u64 = 5000;
 
 /// Handles an incoming HTTP request by routing it through the mock engine.
 ///
-/// Returns the response, decision, request headers, and request body for event emission.
+/// Reads the body, converts to canonical `RequestData`, and asks the engine for
+/// a `Decision`. Response building is the caller's responsibility: `Mock` and
+/// `Reject` decisions are turned into `Response` values via [`build_mock_response`]
+/// / [`build_reject_response`]; `Forward` decisions are executed by `handle_route`
+/// via `UpstreamClient::send`.
 pub async fn handle_request(
     request: Request,
     engine: Arc<tokio::sync::RwLock<Engine>>,
     max_body_bytes: usize,
-) -> Result<(Response, Decision, Vec<(String, String)>, Vec<u8>), HttpError> {
+) -> Result<(Decision, RequestData), HttpError> {
     let start_time = std::time::Instant::now();
 
     // Extract request components
@@ -48,48 +52,24 @@ pub async fn handle_request(
     );
 
     // Convert to RequestData
-    let request_data = convert_request(method.clone(), uri.clone(), headers.clone(), body.clone())?;
-
-    // Convert headers to Vec for event emission
-    let request_headers: Vec<(String, String)> = headers
-        .iter()
-        .map(|(name, value)| {
-            (
-                name.as_str().to_lowercase(),
-                value.to_str().unwrap_or_default().to_string(),
-            )
-        })
-        .collect();
-
-    // Convert body to bytes for event emission
-    let request_body = body_to_bytes(&body);
+    let request_data = convert_request(method.clone(), uri.clone(), headers.clone(), body)?;
 
     // Call engine decision (acquire read lock for the duration of decision)
-    let decision = engine.read().await.decide(request_data).map_err(|e| {
-        error!("engine.decide() failed: {}", e);
-        HttpError::ServerStopped(e.to_string())
-    })?;
+    let decision = {
+        let engine_guard = engine.read().await;
+        engine_guard.decide(request_data.clone()).map_err(|e| {
+            error!("engine.decide() failed: {}", e);
+            HttpError::ServerStopped(e.to_string())
+        })?
+    };
 
     debug!(?decision, "engine decision made");
+    debug!(
+        decision_ms = start_time.elapsed().as_millis() as u64,
+        "decision produced"
+    );
 
-    // Build response based on decision type
-    debug!(?decision, "building response for decision");
-    let response = match &decision {
-        Decision::Mock { response, .. } => {
-            debug!("building mock response");
-            build_mock_response(response.clone()).await
-        }
-        Decision::Reject { response, .. } => {
-            debug!("building reject response");
-            build_reject_response(response.clone()).await
-        }
-        Decision::Forward { plan, .. } => {
-            debug!("building forward response with plan");
-            Ok(build_forward_response(plan.clone()))
-        }
-    };
-    debug!("response built, returning");
-    response.map(|r| (r, decision, request_headers, request_body))
+    Ok((decision, request_data))
 }
 
 /// Reads the request body, enforcing the size limit.
@@ -193,8 +173,8 @@ fn convert_request(
         .with_body(body))
 }
 
-/// Builds an HTTP response for a Mock decision.
-async fn build_mock_response(response: ResponseData) -> Result<Response, HttpError> {
+/// Builds an HTTP response for a Mock decision or a Reject decision.
+pub async fn build_mock_response(response: ResponseData) -> Result<Response, HttpError> {
     // Apply delay if specified
     if let Some(delay_ms) = response.delay_ms {
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -236,49 +216,8 @@ async fn build_mock_response(response: ResponseData) -> Result<Response, HttpErr
 }
 
 /// Builds an HTTP response for a Reject decision.
-async fn build_reject_response(response: ResponseData) -> Result<Response, HttpError> {
+pub async fn build_reject_response(response: ResponseData) -> Result<Response, HttpError> {
     build_mock_response(response).await
-}
-
-/// Builds a special response that carries the ForwardPlan.
-/// This uses a custom header to encode the forward information.
-/// In practice, this would be handled by returning a special type that
-/// the server can detect and process.
-fn build_forward_response(plan: ForwardPlan) -> Response {
-    // Serialize the ForwardPlan to JSON and embed it
-    let plan_json = serde_json::to_string(&plan).unwrap_or_default();
-
-    axum::response::Response::builder()
-        .status(StatusCode::PROCESSING) // 102 Processing
-        .header("X-Forward-Plan", plan_json)
-        .body(axum::body::Body::empty())
-        .expect("failed to build forward response")
-}
-
-/// Extracts a ForwardPlan from a response (if present).
-pub fn extract_forward_plan(response: &Response) -> Option<ForwardPlan> {
-    let plan_header = response.headers().get("X-Forward-Plan")?;
-
-    let plan_str = plan_header.to_str().ok()?;
-    serde_json::from_str(plan_str).ok()
-}
-
-/// Extracts the response body as bytes (up to MAX_BODY_PREVIEW).
-fn extract_response_body(response: &Response) -> Vec<u8> {
-    // The response body is already consumed by the caller in the async chain.
-    // For now, return an empty body since we can't re-read the response body.
-    // In a real implementation, we'd capture the body before building the response.
-    Vec::new()
-}
-
-/// Converts BodyData to raw bytes for event emission.
-fn body_to_bytes(body: &BodyData) -> Vec<u8> {
-    match body {
-        BodyData::Empty => Vec::new(),
-        BodyData::Text(s) => s.as_bytes().to_vec(),
-        BodyData::Json(v) => v.to_string().into_bytes(),
-        BodyData::Binary(b) => b.clone(),
-    }
 }
 
 #[cfg(test)]
@@ -374,16 +313,71 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let (response, _decision, _, _) = handle_request(request, engine, 1024).await.unwrap();
+        let (decision, request_data) = handle_request(request, engine, 1024).await.unwrap();
 
-        // Check that we got a forward response
-        let status = response.status();
-        assert_eq!(status, 102, "Expected 102 Processing, got {}", status);
-
-        // Check that X-Forward-Plan header is present
+        // Forward decisions surface the original request data and a Forward plan;
+        // the actual upstream HTTP call is executed by handle_route.
         assert!(
-            response.headers().contains_key("x-forward-plan"),
-            "Missing X-Forward-Plan header"
+            matches!(decision, Decision::Forward { .. }),
+            "Expected Forward decision"
         );
+        assert_eq!(request_data.method, "GET");
+        assert_eq!(request_data.path, "/proxy");
+    }
+
+    #[tokio::test]
+    async fn test_handle_route_forward_returns_upstream_response_or_502() {
+        // Spin a tiny upstream
+        let upstream = axum::Router::new().route(
+            "/",
+            axum::routing::any(|| async {
+                axum::http::Response::builder()
+                    .status(200)
+                    .body(axum::body::Body::from("upstream-ok"))
+                    .unwrap()
+            }),
+        );
+        let upstream_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_addr = upstream_listener.local_addr().unwrap();
+        let upstream_url = format!("http://{}/", upstream_addr);
+        let _upstream_task = tokio::spawn(async move {
+            let _ = axum::serve(upstream_listener, upstream).await;
+        });
+
+        // Engine with a forward route pointing at that upstream
+        let json = format!(
+            r#"{{
+                "defaults": {{"upstream_timeout_ms": 5000, "max_body_bytes": 1048576}},
+                "routes": [{{
+                    "id": "proxy",
+                    "priority": 100,
+                    "match_rule": {{"method": "GET", "path": "/proxy"}},
+                    "action": {{"type": "forward", "upstream": "{}"}}
+                }}]
+            }}"#,
+            upstream_url
+        );
+        let engine = Arc::new(tokio::sync::RwLock::new(
+            mock_core::Engine::compile(&json).unwrap(),
+        ));
+
+        // Bind a mock-api server on a random port
+        use crate::server::{HttpServer, ServerConfig};
+        let server = HttpServer::start_server(ServerConfig::new("127.0.0.1", 0), engine, None)
+            .await
+            .unwrap();
+        let addr = server.local_addr();
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("http://{}/proxy", addr))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+        let body = response.text().await.unwrap();
+        assert_eq!(body, "upstream-ok");
+
+        server.shutdown();
     }
 }

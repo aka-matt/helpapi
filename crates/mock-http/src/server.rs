@@ -2,6 +2,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use axum::{Router, body::Body, extract::Request, response::Response, routing::any};
@@ -15,9 +16,13 @@ use tower_http::compression::CompressionLayer;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info, warn};
 
+use crate::client::UpstreamClient;
 use crate::error::HttpError;
 use crate::events::{DecisionType, RequestResult, RequestSummary, RuntimeEvent};
-use crate::handler::handle_request;
+use crate::handler::{build_mock_response, build_reject_response, handle_request};
+
+/// Default maximum response body size in bytes (5 MiB).
+pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 5 * 1024 * 1024;
 
 /// Configuration for the HTTP server.
 #[derive(Debug, Clone)]
@@ -30,6 +35,8 @@ pub struct ServerConfig {
     pub max_body_bytes: usize,
     /// Timeout for upstream requests in milliseconds.
     pub upstream_timeout_ms: u64,
+    /// Maximum upstream response body size in bytes.
+    pub max_response_bytes: usize,
 }
 
 impl ServerConfig {
@@ -40,6 +47,7 @@ impl ServerConfig {
             port,
             max_body_bytes: 1_048_576, // 1 MiB default
             upstream_timeout_ms: 10_000,
+            max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
         }
     }
 
@@ -52,6 +60,12 @@ impl ServerConfig {
     /// Sets the upstream timeout in milliseconds.
     pub fn with_upstream_timeout_ms(mut self, ms: u64) -> Self {
         self.upstream_timeout_ms = ms;
+        self
+    }
+
+    /// Sets the maximum upstream response body size in bytes.
+    pub fn with_max_response_bytes(mut self, bytes: usize) -> Self {
+        self.max_response_bytes = bytes;
         self
     }
 
@@ -135,6 +149,9 @@ impl HttpServer {
                 engine: engine.clone(),
                 config: config.clone(),
                 events_tx: events.clone(),
+                client: UpstreamClient::with_timeout(Duration::from_millis(
+                    config.upstream_timeout_ms,
+                )),
             });
 
         // Emit ServerStarted event
@@ -200,6 +217,7 @@ struct AppState {
     engine: Arc<RwLock<Engine>>,
     config: ServerConfig,
     events_tx: Option<mpsc::Sender<RuntimeEvent>>,
+    client: UpstreamClient,
 }
 
 /// Request handler that routes through the mock engine.
@@ -248,14 +266,28 @@ async fn handle_route(
     }
 
     match handle_request(request, engine, max_body_bytes).await {
-        Ok((response, decision, _request_headers, _request_body)) => {
-            debug!("handler returned success response");
+        Ok((decision, request_data)) => {
+            debug!("handler returned decision");
 
-            // Determine decision type
+            // Snapshot the decision type before consuming the decision
             let decision_type = match &decision {
                 Decision::Mock { .. } => DecisionType::Mock,
                 Decision::Forward { .. } => DecisionType::Forward,
                 Decision::Reject { .. } => DecisionType::Reject,
+            };
+
+            // Build the response based on the decision
+            let build_result = build_decision_response(
+                &state,
+                decision,
+                request_data,
+                state.config.max_response_bytes,
+            )
+            .await;
+
+            let response = match build_result {
+                Ok(r) => r,
+                Err(e) => build_error_response(e),
             };
 
             // Emit RequestCompleted event
@@ -287,26 +319,83 @@ async fn handle_route(
                     .await;
             }
 
-            // Map error to appropriate HTTP status code
-            let status = match e {
-                HttpError::BodyTooLarge { .. } => axum::http::StatusCode::PAYLOAD_TOO_LARGE,
-                _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            };
-            let body_msg = match e {
-                HttpError::BodyTooLarge { size, limit } => {
-                    format!(
-                        "Request body too large: {} bytes exceeds limit of {} bytes",
-                        size, limit
-                    )
-                }
-                _ => "Internal server error".to_string(),
-            };
-            axum::response::Response::builder()
-                .status(status)
-                .body(Body::from(body_msg))
-                .unwrap_or_else(|_| axum::response::Response::new(Body::from("Error")))
+            build_error_response(e)
         }
     }
+}
+
+/// Builds the response for a `Decision` produced by `handle_request`.
+///
+/// `Forward` decisions execute the upstream HTTP call via `UpstreamClient::send`.
+/// `Mock` and `Reject` decisions are rendered locally.
+async fn build_decision_response(
+    state: &AppState,
+    decision: Decision,
+    request_data: mock_core::RequestData,
+    max_response_bytes: usize,
+) -> Result<Response, HttpError> {
+    match decision {
+        Decision::Mock { response, .. } => build_mock_response(response).await,
+        Decision::Reject { response, .. } => build_reject_response(response).await,
+        Decision::Forward { plan, .. } => {
+            let size = request_data.body.size_bytes();
+            // Quick local check on the request body size — the upstream body
+            // size is enforced separately on the response.
+            if size > max_response_bytes {
+                return Err(HttpError::ResponseTooLarge {
+                    size,
+                    limit: max_response_bytes,
+                });
+            }
+
+            let engine = state.engine.read().await;
+            match state.client.send(plan, request_data, &engine).await {
+                Ok(response_data) => build_mock_response(response_data).await,
+                Err(upstream_err) => {
+                    let http_err: HttpError = upstream_err.into();
+                    let reason = match &http_err {
+                        HttpError::UpstreamFailed { reason } => reason.clone(),
+                        _ => "unknown upstream error".to_string(),
+                    };
+                    error!("upstream call failed: {}", reason);
+                    Ok(Response::builder()
+                        .status(axum::http::StatusCode::BAD_GATEWAY)
+                        .body(Body::from(format!("upstream error: {}", reason)))
+                        .expect("failed to build 502 response"))
+                }
+            }
+        }
+    }
+}
+
+/// Builds a generic error response for an `HttpError`.
+fn build_error_response(e: HttpError) -> Response {
+    let status = match &e {
+        HttpError::BodyTooLarge { .. } => axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+        HttpError::ResponseTooLarge { .. } => axum::http::StatusCode::BAD_GATEWAY,
+        HttpError::UpstreamFailed { .. } => axum::http::StatusCode::BAD_GATEWAY,
+        _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    let body_msg = match &e {
+        HttpError::BodyTooLarge { size, limit } => {
+            format!(
+                "Request body too large: {} bytes exceeds limit of {} bytes",
+                size, limit
+            )
+        }
+        HttpError::ResponseTooLarge { size, limit } => {
+            format!(
+                "Upstream response too large: {} bytes exceeds limit of {} bytes",
+                size, limit
+            )
+        }
+        HttpError::UpstreamFailed { reason } => format!("upstream error: {}", reason),
+        _ => "Internal server error".to_string(),
+    };
+    Response::builder()
+        .status(status)
+        .body(Body::from(body_msg))
+        .unwrap_or_else(|_| Response::new(Body::from("Error")))
 }
 
 /// Generates a simple request ID for event tracking.
@@ -389,18 +478,21 @@ mod tests {
         assert_eq!(config.port, 8080);
         assert_eq!(config.max_body_bytes, 1_048_576);
         assert_eq!(config.upstream_timeout_ms, 10_000);
+        assert_eq!(config.max_response_bytes, DEFAULT_MAX_RESPONSE_BYTES);
     }
 
     #[tokio::test]
     async fn test_server_config_builder() {
         let config = ServerConfig::new("0.0.0.0", 3000)
             .with_max_body_bytes(2_097_152)
-            .with_upstream_timeout_ms(5_000);
+            .with_upstream_timeout_ms(5_000)
+            .with_max_response_bytes(10_485_760);
 
         assert_eq!(config.host, "0.0.0.0");
         assert_eq!(config.port, 3000);
         assert_eq!(config.max_body_bytes, 2_097_152);
         assert_eq!(config.upstream_timeout_ms, 5_000);
+        assert_eq!(config.max_response_bytes, 10_485_760);
     }
 
     #[tokio::test]
