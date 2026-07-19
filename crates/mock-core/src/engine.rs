@@ -564,9 +564,17 @@ fn compile_match_rule(rule_val: &serde_json::Value) -> Result<Vec<Box<dyn Matche
 fn compile_transforms(
     action_val: &serde_json::Value,
 ) -> Result<(Vec<Box<dyn Transform>>, Vec<Box<dyn Transform>>), String> {
-    let req_t = load_transforms(action_val.get("request_transforms"))?;
-    let resp_t = load_transforms(action_val.get("response_transforms"))?;
-    Ok((req_t, resp_t))
+    let type_str = action_val
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("mock");
+    if type_str == "forward" {
+        let req_t = load_transforms(action_val.get("request_transforms"))?;
+        let resp_t = load_transforms(action_val.get("response_transforms"))?;
+        Ok((req_t, resp_t))
+    } else {
+        Ok((Vec::new(), Vec::new()))
+    }
 }
 
 fn load_transforms(v: Option<&serde_json::Value>) -> Result<Vec<Box<dyn Transform>>, String> {
@@ -1102,5 +1110,28 @@ mod tests {
             }]
         }"#;
         assert!(Engine::compile(json).is_err());
+    }
+
+    #[test]
+    fn test_mock_action_ignores_transform_keys() {
+        let json = r#"{
+            "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
+            "routes": [{
+                "id": "mock-with-bogus-transform",
+                "priority": 100,
+                "match_rule": {"method": "GET", "path": "/x"},
+                "action": {
+                    "type": "mock",
+                    "response": {"status": 200},
+                    "request_transforms": [{"type": "set_header", "name": "X-Foo", "value": "bar"}]
+                }
+            }]
+        }"#;
+        let engine = Engine::compile(json).unwrap();
+        let rule = &engine.routes()[0];
+        assert!(
+            rule.request_transforms.is_empty(),
+            "mock actions must ignore request_transforms"
+        );
     }
 }
