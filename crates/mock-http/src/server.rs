@@ -205,7 +205,7 @@ async fn handle_route(
     let start_time = Instant::now();
 
     // Generate request ID and extract summary info for event
-    let request_id = uuid_v4();
+    let request_id = gen_request_id();
     let method = request.method().to_string();
     let path = request.uri().path().to_string();
 
@@ -281,8 +281,8 @@ async fn handle_route(
     }
 }
 
-/// Generates a simple UUID-like request ID for event tracking.
-fn uuid_v4() -> String {
+/// Generates a simple request ID for event tracking.
+fn gen_request_id() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
