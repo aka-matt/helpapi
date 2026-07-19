@@ -8,10 +8,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::tui::event_handler::{mask_sensitive_headers, truncate_body};
 use crate::tui::state::AppState;
-
-/// Maximum body preview size (32 KiB).
-const MAX_BODY_PREVIEW: usize = 32 * 1024;
 
 /// Request details widget.
 #[derive(Debug)]
@@ -68,7 +66,8 @@ impl RequestDetails {
         lines.push(Line::from(vec![
             Span::styled("Headers:", Style::default().fg(Color::Cyan)),
         ]));
-        for (key, value) in &selected.request_headers {
+        let masked_req_headers = mask_sensitive_headers(&selected.request_headers);
+        for (key, value) in &masked_req_headers {
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(format!("{}: ", key), Style::default().fg(Color::Magenta)),
@@ -76,11 +75,12 @@ impl RequestDetails {
             ]));
         }
 
-        // Request body
+        // Request body (truncated to 32 KiB for display)
         lines.push(Line::from(vec![
             Span::styled("Body:", Style::default().fg(Color::Cyan)),
         ]));
-        let body_str = decode_body(&selected.request_body);
+        let truncated_body = truncate_body(&selected.request_body);
+        let body_str = decode_body(truncated_body);
         for line in body_str.lines().take(20) {
             lines.push(Line::from(vec![
                 Span::raw("  "),
@@ -141,7 +141,8 @@ impl RequestDetails {
                 Span::raw("  -"),
             ]));
         } else {
-            for (key, value) in &selected.response_headers {
+            let masked_resp_headers = mask_sensitive_headers(&selected.response_headers);
+            for (key, value) in &masked_resp_headers {
                 lines.push(Line::from(vec![
                     Span::raw("  "),
                     Span::styled(format!("{}: ", key), Style::default().fg(Color::Magenta)),
@@ -150,11 +151,12 @@ impl RequestDetails {
             }
         }
 
-        // Response body
+        // Response body (truncated to 32 KiB for display)
         lines.push(Line::from(vec![
             Span::styled("Body:", Style::default().fg(Color::Cyan)),
         ]));
-        let resp_body_str = decode_body(&selected.response_body);
+        let truncated_resp_body = truncate_body(&selected.response_body);
+        let resp_body_str = decode_body(truncated_resp_body);
         if resp_body_str.is_empty() {
             lines.push(Line::from(vec![
                 Span::raw("  -"),

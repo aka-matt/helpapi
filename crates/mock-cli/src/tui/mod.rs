@@ -4,8 +4,10 @@
 //! monitoring and interacting with the mock API runtime.
 
 mod app;
+mod event_handler;
 mod state;
 pub mod widgets;
 
 pub use app::App;
+pub use event_handler::{mask_sensitive_headers, truncate_body};
 pub use state::{AppState, RequestRecord, MAX_REQUESTS};
