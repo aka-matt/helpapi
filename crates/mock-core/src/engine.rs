@@ -160,6 +160,13 @@ impl Engine {
         })
     }
 
+    /// Returns the compiled rules for inspection.
+    ///
+    /// This is intended for use in tests and debugging.
+    pub fn routes(&self) -> &[CompiledRule] {
+        &self.rules
+    }
+
     /// Evaluates an incoming [`RequestData`] against the compiled rules.
     ///
     /// Rules are tried in priority order. The first rule where **all** matchers

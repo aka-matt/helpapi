@@ -435,12 +435,14 @@ fn transform_config() -> &'static str {
                 "priority": 100,
                 "match_rule": { "method": "POST", "path": "/api/transform" },
                 "action": {
-                    "type": "mock",
-                    "response": {
-                        "status": 200,
-                        "headers": { "Content-Type": "application/json" },
-                        "json_body": { "transformed": true }
-                    }
+                    "type": "forward",
+                    "upstream": "http://httpbin.org",
+                    "request_transforms": [
+                        {"type": "SetHeader", "name": "X-Request-Id", "value": "test-123"}
+                    ],
+                    "response_transforms": [
+                        {"type": "SetJsonPointer", "path": "/transformed", "value": true}
+                    ]
                 }
             }
         ],
@@ -459,22 +461,56 @@ fn transform_config() -> &'static str {
 
 #[tokio::test]
 async fn test_transform_config_is_parsed() {
-    // This test verifies that transform configurations are properly parsed.
-    // The actual transform application is tested in mock-core unit tests.
+    // This test verifies that transform configurations are properly parsed
+    // and attached to the compiled rule.
     let config = transform_config();
     let engine = mock_core::Engine::compile(config).expect("config should compile");
 
+    // Verify transforms are stored in the compiled rule
+    let routes = engine.routes();
+    let transform_route = routes
+        .iter()
+        .find(|r| r.id == "transform-route")
+        .expect("transform-route should exist");
+
+    // Verify request transforms are non-empty
+    assert!(
+        !transform_route.request_transforms.is_empty(),
+        "request_transforms should not be empty"
+    );
+    assert_eq!(
+        transform_route.request_transforms.len(),
+        1,
+        "should have exactly 1 request transform"
+    );
+
+    // Verify response transforms are non-empty
+    assert!(
+        !transform_route.response_transforms.is_empty(),
+        "response_transforms should not be empty"
+    );
+    assert_eq!(
+        transform_route.response_transforms.len(),
+        1,
+        "should have exactly 1 response transform"
+    );
+
+    // Verify the decision is Forward
     let request = mock_core::RequestData::new("POST", "/api/transform").with_body(
         mock_core::BodyData::Json(serde_json::json!({"input": "value"})),
     );
     let decision = engine.decide(request).expect("should decide");
 
     match decision {
-        mock_core::Decision::Mock { response, .. } => {
-            assert_eq!(response.status, 200);
-            assert!(matches!(response.body, mock_core::BodyData::Json(_)));
+        mock_core::Decision::Forward { .. } => {
+            // Forward route was recognized with transforms - test passes
         }
-        _ => panic!("Expected Mock decision for transform route"),
+        mock_core::Decision::Mock { response, .. } => {
+            panic!("Expected Forward decision, got Mock({})", response.status);
+        }
+        mock_core::Decision::Reject { response, .. } => {
+            panic!("Expected Forward decision, got Reject({})", response.status);
+        }
     }
 }
 
