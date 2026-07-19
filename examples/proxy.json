@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8081
+  },
+  "defaults": {
+    "upstream_timeout_ms": 5000,
+    "max_body_bytes": 1048576
+  },
+  "routes": [
+    {
+      "id": "proxy-jsonplaceholder",
+      "priority": 100,
+      "match_rule": {
+        "method": "GET",
+        "path": "/posts/:id"
+      },
+      "action": {
+        "type": "forward",
+        "upstream": "https://jsonplaceholder.typicode.com",
+        "request_transforms": [],
+        "response_transforms": []
+      }
+    },
+    {
+      "id": "proxy-list-posts",
+      "priority": 50,
+      "match_rule": {
+        "method": "GET",
+        "path": "/posts"
+      },
+      "action": {
+        "type": "forward",
+        "upstream": "https://jsonplaceholder.typicode.com",
+        "request_transforms": [],
+        "response_transforms": []
+      }
+    },
+    {
+      "id": "proxy-headers",
+      "priority": 100,
+      "match_rule": {
+        "method": "GET",
+        "path": "/headers"
+      },
+      "action": {
+        "type": "forward",
+        "upstream": "https://httpbin.org",
+        "request_transforms": [
+          {
+            "type": "set_header",
+            "name": "X-Forwarded-By",
+            "value": "helpapi"
+          },
+          {
+            "type": "set_header",
+            "name": "X-Request-Id",
+            "value": "test-123"
+          }
+        ],
+        "response_transforms": []
+      }
+    }
+  ],
+  "unmatched": {
+    "action": {
+      "type": "mock",
+      "response": {
+        "status": 502,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json_body": {
+          "error": "Bad Gateway",
+          "message": "No route matched and no upstream configured"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8082
+  },
+  "defaults": {
+    "upstream_timeout_ms": 10000,
+    "max_body_bytes": 1048576
+  },
+  "routes": [
+    {
+      "id": "add-header",
+      "priority": 100,
+      "match_rule": {
+        "method": "GET",
+        "path": "/api/headers"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "X-Custom-Header": "added-by-transform",
+            "X-Processed-At": "2024-01-15"
+          },
+          "json_body": {
+            "message": "Response with custom headers"
+          }
+        }
+      }
+    },
+    {
+      "id": "delay-response",
+      "priority": 100,
+      "match_rule": {
+        "method": "GET",
+        "path": "/api/delayed"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": {
+            "message": "This response was delayed"
+          },
+          "delay_ms": 500
+        }
+      }
+    },
+    {
+      "id": "json-body-mock",
+      "priority": 100,
+      "match_rule": {
+        "method": "POST",
+        "path": "/api/echo"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": {
+            "echo": true,
+            "received": {
+              "message": "Hello from client"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "text-response",
+      "priority": 100,
+      "match_rule": {
+        "method": "GET",
+        "path": "/api/text"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": "text/plain"
+          },
+          "text_body": "This is plain text returned by the mock"
+        }
+      }
+    },
+    {
+      "id": "remove-internal-headers",
+      "priority": 90,
+      "match_rule": {
+        "method": "GET",
+        "path": "/api/clean"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "X-Internal-Debug": "secret",
+            "X-Response-Id": "12345"
+          },
+          "json_body": {
+            "data": "visible"
+          }
+        }
+      }
+    },
+    {
+      "id": "forward-with-request-transform",
+      "priority": 100,
+      "match_rule": {
+        "method": "POST",
+        "path": "/api/forward"
+      },
+      "action": {
+        "type": "forward",
+        "upstream": "https://httpbin.org",
+        "request_transforms": [
+          {
+            "type": "set_header",
+            "name": "X-API-Key",
+            "value": "test-key-12345"
+          },
+          {
+            "type": "set_header",
+            "name": "X-Forwarded-For",
+            "value": "192.168.1.100"
+          }
+        ],
+        "response_transforms": []
+      }
+    },
+    {
+      "id": "query-param-add",
+      "priority": 100,
+      "match_rule": {
+        "method": "GET",
+        "path": "/api/search"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": {
+            "results": [
+              { "id": 1, "name": "Item One" },
+              { "id": 2, "name": "Item Two" }
+            ],
+            "query": {}
+          }
+        }
+      }
+    }
+  ],
+  "unmatched": {
+    "action": {
+      "type": "mock",
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json_body": {
+          "error": "Endpoint not found"
+        }
+      }
+    }
+  }
+}

@@ -130,6 +130,8 @@ mod tests {
         let summary = RequestSummary {
             method: "GET".to_string(),
             path: "/users/123".to_string(),
+            headers: vec![],
+            body: vec![],
             rule_id: Some("get-user".to_string()),
             upstream_url: None,
         };
@@ -143,6 +145,8 @@ mod tests {
     fn test_request_result_serialization() {
         let result = RequestResult {
             status: 200,
+            headers: vec![],
+            body: vec![],
             elapsed_ms: 42,
             decision_type: DecisionType::Mock,
         };

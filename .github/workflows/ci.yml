@@ -53,3 +53,17 @@ jobs:
           toolchannel: stable
       - name: cargo doc --workspace --no-deps
         run: cargo doc --workspace --no-deps
+
+  wasm:
+    name: wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-action-setup@v1
+        with:
+          toolchannel: stable
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: wasm-pack test --node crates/mock-wasm
+        run: wasm-pack test --node crates/mock-wasm

@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8080
+  },
+  "defaults": {
+    "upstream_timeout_ms": 10000,
+    "max_body_bytes": 1048576
+  },
+  "routes": [
+    {
+      "id": "get-user",
+      "priority": 100,
+      "match_rule": {
+        "method": "GET",
+        "path": "/users/:id"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": {
+            "id": 1,
+            "name": "Alice",
+            "email": "alice@example.com"
+          }
+        }
+      }
+    },
+    {
+      "id": "list-users",
+      "priority": 50,
+      "match_rule": {
+        "method": "GET",
+        "path": "/users"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": [
+            { "id": 1, "name": "Alice" },
+            { "id": 2, "name": "Bob" },
+            { "id": 3, "name": "Carol" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "create-user",
+      "priority": 100,
+      "match_rule": {
+        "method": "POST",
+        "path": "/users"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 201,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": {
+            "id": 4,
+            "name": "New User",
+            "created": true
+          }
+        }
+      }
+    }
+  ],
+  "unmatched": {
+    "action": {
+      "type": "mock",
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json_body": {
+          "error": "Not Found",
+          "message": "No route matched the request"
+        }
+      }
+    }
+  }
+}
