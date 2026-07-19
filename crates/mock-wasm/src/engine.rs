@@ -109,7 +109,7 @@ mod tests {
         "path": "/users/42",
         "query": [],
         "headers": [],
-        "body": "Empty"
+        "body": "empty"
     }"#;
 
     fn compile_engine(config_json: &str) -> Engine {
@@ -143,7 +143,7 @@ mod tests {
             "path": "/unknown",
             "query": [],
             "headers": [],
-            "body": "Empty"
+            "body": "empty"
         }"#;
         let request: RequestData = serde_json::from_str(request_json).unwrap();
         let decision = engine.decide(request).unwrap();

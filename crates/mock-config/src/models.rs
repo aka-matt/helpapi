@@ -6,15 +6,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Body data variants for request/response bodies.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum BodyData {
-    #[default]
-    Empty,
-    Text(String),
-    Json(serde_json::Value),
-}
+// Canonical re-exports: the single source of truth lives in `mock-core`.
+pub use mock_core::body::BodyData;
+pub use mock_core::transform::spec::Transform;
 
 /// Top-level configuration structure.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -123,39 +117,6 @@ pub struct Response {
     pub text_body: Option<String>,
     #[serde(default)]
     pub delay_ms: Option<u64>,
-}
-
-/// Transform operations for request/response modification.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case", tag = "type")]
-pub enum Transform {
-    SetHeader {
-        name: String,
-        value: String,
-    },
-    RemoveHeader {
-        name: String,
-    },
-    SetQuery {
-        name: String,
-        value: String,
-    },
-    RemoveQuery {
-        name: String,
-    },
-    SetJsonPointer {
-        path: String,
-        value: serde_json::Value,
-    },
-    RemoveJsonPointer {
-        path: String,
-    },
-    ReplaceBody {
-        body: BodyData,
-    },
-    SetStatus {
-        status: u16,
-    },
 }
 
 /// Configuration for requests that match no route.

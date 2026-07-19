@@ -564,36 +564,22 @@ fn compile_match_rule(rule_val: &serde_json::Value) -> Result<Vec<Box<dyn Matche
 fn compile_transforms(
     action_val: &serde_json::Value,
 ) -> Result<(Vec<Box<dyn Transform>>, Vec<Box<dyn Transform>>), String> {
-    let type_str = action_val
-        .get("type")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "mock".to_string());
+    let req_t = load_transforms(action_val.get("request_transforms"))?;
+    let resp_t = load_transforms(action_val.get("response_transforms"))?;
+    Ok((req_t, resp_t))
+}
 
-    match type_str.as_str() {
-        "forward" => {
-            let req_t: Vec<Box<dyn Transform>> = action_val
-                .get("request_transforms")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|t| convert_transform(t).ok())
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            let resp_t: Vec<Box<dyn Transform>> = action_val
-                .get("response_transforms")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|t| convert_transform(t).ok())
-                        .collect()
-                })
-                .unwrap_or_default();
-
-            Ok((req_t, resp_t))
+fn load_transforms(v: Option<&serde_json::Value>) -> Result<Vec<Box<dyn Transform>>, String> {
+    match v {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(arr) => {
+            let specs: Vec<crate::transform::spec::Transform> = serde_json::from_value(arr.clone())
+                .map_err(|e| format!("invalid transforms: {}", e))?;
+            Ok(specs
+                .iter()
+                .map(crate::transform::from_spec::transform_from_spec)
+                .collect())
         }
-        _ => Ok((Vec::new(), Vec::new())),
     }
 }
 
@@ -666,106 +652,6 @@ fn parse_response(
     };
 
     Ok((status, body, headers, delay_ms))
-}
-
-/// Converts a JSON transform value to a `Box<dyn Transform>`.
-fn convert_transform(t: &serde_json::Value) -> Result<Box<dyn Transform>, String> {
-    use crate::transform::*;
-
-    let t_obj = t.as_object().ok_or("transform: must be an object")?;
-
-    let type_str = t_obj
-        .get("type")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .ok_or("transform: missing 'type' field")?;
-
-    match type_str.as_str() {
-        "SetHeader" => {
-            let name = t_obj
-                .get("name")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("SetHeader: missing 'name'")?
-                .to_string();
-            let value = t_obj
-                .get("value")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("SetHeader: missing 'value'")?
-                .to_string();
-            Ok(Box::new(SetHeader::new(name, value)) as Box<dyn Transform>)
-        }
-        "RemoveHeader" => {
-            let name = t_obj
-                .get("name")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("RemoveHeader: missing 'name'")?
-                .to_string();
-            Ok(Box::new(RemoveHeader::new(name)) as Box<dyn Transform>)
-        }
-        "SetQuery" => {
-            let name = t_obj
-                .get("name")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("SetQuery: missing 'name'")?
-                .to_string();
-            let value = t_obj
-                .get("value")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("SetQuery: missing 'value'")?
-                .to_string();
-            Ok(Box::new(SetQuery::new(name, value)) as Box<dyn Transform>)
-        }
-        "RemoveQuery" => {
-            let name = t_obj
-                .get("name")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("RemoveQuery: missing 'name'")?
-                .to_string();
-            Ok(Box::new(RemoveQuery::new(name)) as Box<dyn Transform>)
-        }
-        "SetJsonPointer" => {
-            let path = t_obj
-                .get("path")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("SetJsonPointer: missing 'path'")?
-                .to_string();
-            let value = t_obj
-                .get("value")
-                .cloned()
-                .ok_or("SetJsonPointer: missing 'value'")?;
-            Ok(Box::new(SetJsonPointer::new(path, value)) as Box<dyn Transform>)
-        }
-        "RemoveJsonPointer" => {
-            let path = t_obj
-                .get("path")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("RemoveJsonPointer: missing 'path'")?
-                .to_string();
-            Ok(Box::new(RemoveJsonPointer::new(path)) as Box<dyn Transform>)
-        }
-        "ReplaceBody" => {
-            let body = match t_obj.get("body") {
-                Some(v) if v.get("json").is_some() => {
-                    crate::BodyData::Json(v.get("json").cloned().unwrap_or(serde_json::Value::Null))
-                }
-                Some(v) if v.get("text").is_some() => crate::BodyData::Text(
-                    v.get("text")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                ),
-                _ => crate::BodyData::Empty,
-            };
-            Ok(Box::new(ReplaceBody::new(body)) as Box<dyn Transform>)
-        }
-        "SetStatus" => {
-            let status = t_obj
-                .get("status")
-                .and_then(|v| v.as_u64())
-                .ok_or("SetStatus: missing 'status'")? as u16;
-            Ok(Box::new(SetStatus::new(status)) as Box<dyn Transform>)
-        }
-        _ => Err(format!("unknown transform type: {}", type_str)),
-    }
 }
 
 // === Tests ===
@@ -958,7 +844,7 @@ mod tests {
                 "action": {
                     "type": "forward",
                     "upstream": "https://api.example.com",
-                    "request_transforms": [{"type": "SetHeader", "name": "X-Forwarded-User", "value": "from-config"}]
+                    "request_transforms": [{"type": "set_header", "name": "X-Forwarded-User", "value": "from-config"}]
                 }
             }]
         }"#;
@@ -990,7 +876,7 @@ mod tests {
                 "action": {
                     "type": "forward",
                     "upstream": "https://api.example.com",
-                    "response_transforms": [{"type": "SetJsonPointer", "path": "/transformed", "value": true}]
+                    "response_transforms": [{"type": "set_json_pointer", "path": "/transformed", "value": true}]
                 }
             }]
         }"#;
@@ -1152,5 +1038,69 @@ mod tests {
     fn test_compile_missing_routes() {
         let result = Engine::compile(r#"{"defaults": {"upstream_timeout_ms": 5000}}"#);
         assert!(result.is_err());
+    }
+
+    // --- Typed Transform loading (Task B2) ---
+
+    #[test]
+    fn test_transforms_set_header_in_route() {
+        let json = r#"{
+            "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
+            "routes": [{
+                "id": "add-header",
+                "priority": 100,
+                "match_rule": {"method": "GET", "path": "/x"},
+                "action": {
+                    "type": "forward",
+                    "upstream": "https://api.example.com",
+                    "request_transforms": [
+                        {"type": "set_header", "name": "X-Foo", "value": "bar"}
+                    ]
+                }
+            }]
+        }"#;
+        let engine = Engine::compile(json).unwrap();
+        let rule = &engine.routes()[0];
+        assert_eq!(rule.request_transforms.len(), 1);
+        assert_eq!(rule.request_transforms[0].name(), "SetHeader");
+    }
+
+    #[test]
+    fn test_transforms_bad_variant_fails() {
+        let json = r#"{
+            "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
+            "routes": [{
+                "id": "bogus",
+                "priority": 100,
+                "match_rule": {"method": "GET", "path": "/x"},
+                "action": {
+                    "type": "forward",
+                    "upstream": "https://api.example.com",
+                    "request_transforms": [{"type": "set_color", "r": 0, "g": 0, "b": 0}]
+                }
+            }]
+        }"#;
+        assert!(matches!(
+            Engine::compile(json),
+            Err(crate::engine::EngineError::CompileError(_))
+        ));
+    }
+
+    #[test]
+    fn test_transforms_missing_required_field_fails() {
+        let json = r#"{
+            "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
+            "routes": [{
+                "id": "missing",
+                "priority": 100,
+                "match_rule": {"method": "GET", "path": "/x"},
+                "action": {
+                    "type": "forward",
+                    "upstream": "https://api.example.com",
+                    "request_transforms": [{"type": "set_header", "name": "X-Foo"}]
+                }
+            }]
+        }"#;
+        assert!(Engine::compile(json).is_err());
     }
 }

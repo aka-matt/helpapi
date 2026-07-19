@@ -8,10 +8,17 @@ mod json;
 mod query;
 mod template;
 
+pub mod from_spec;
+pub mod spec;
+
 pub use body::{ReplaceBody, SetStatus};
+pub use from_spec::transform_from_spec;
 pub use headers::{RemoveHeader, SetHeader};
 pub use json::{RemoveJsonPointer, SetJsonPointer};
 pub use query::{RemoveQuery, SetQuery};
+// Note: `spec::Transform` is the typed data enum; `Transform` (above) is the trait.
+// They are intentionally distinct paths to avoid name collision.
+pub use spec::BodyData;
 pub use template::TemplateSubst;
 
 // Re-export TransformError at module level
