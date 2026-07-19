@@ -745,54 +745,7 @@ Search for `let (_, decision, _, _) = handle_request` and similar. Update to `le
 
 - [ ] **Step 9: Add round-trip test in integration crate**
 
-In `crates/mock-integration-tests/tests/integration/main.rs`:
-
-```rust
-#[tokio::test]
-async fn test_forward_round_trip_end_to_end() {
-    use mock_runtime::Runtime;
-
-    let upstream = axum::Router::new().route("/", axum::routing::any(|| async {
-        axum::http::Response::builder().status(200)
-            .header("X-Echo", "yes")
-            .body(axum::body::Body::from("{\"echo\":true}")).unwrap()
-    }));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let upstream_url = format!("http://{}/", addr);
-    let _upstream_task = tokio::spawn(async move {
-        let _ = axum::serve(listener, upstream).await;
-    });
-
-    let config = format!(r#"{{
-        "version": 1,
-        "server": {{ "host": "127.0.0.1", "port": 0 }},
-        "defaults": {{ "upstream_timeout_ms": 5000, "max_body_bytes": 1048576 }},
-        "routes": [{{
-            "id": "proxy",
-            "priority": 100,
-            "match_rule": {{ "method": "GET", "path": "/proxy" }},
-            "action": {{ "type": "forward", "upstream": "{}" }}
-        }}]
-    }}"#, upstream_url);
-
-    let mut runtime = Runtime::new(&config).await.unwrap();
-    runtime.start().await.unwrap();
-    let server_addr = runtime.subscribe();  // ServerStarted event captured; local_addr() alternative
-    // (skip event capture; just bind-test directly)
-    // runtime.subscribe is async; use a different approach:
-    let mut rt_handle = tokio::runtime::Handle::current();
-    // Query runtime status, sleep, then poll a known port
-    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let rt_addr: u16 = {
-        // Bypass: assert status=Running, and try common ports — for simplicity, accept that
-        // this test uses the runtime's subscribe path via a small async task.
-        unimplemented!("runtime has no public addr()")
-    };
-}
-```
-
-Stop — that's unworkable because `Runtime` has no `local_addr()` method. Better: drive the test purely against `mock_core::Engine.decide → UpstreamClient::send` since that is what `handle_route` does internally. The integration test for round-trip moves to `crates/mock-http/tests/integration.rs` (already exists):
+Drive the round-trip test against `mock_http::server::HttpServer::start_server` (which is what `Runtime::start` does internally), not `Runtime`. Add the test to `crates/mock-http/tests/integration.rs` (the file already exists and is the test entry point for `mock-http`):
 
 ```rust
 #[tokio::test]
@@ -830,7 +783,7 @@ async fn test_forward_round_trip_via_handle_route() {
 }
 ```
 
-Drop the integration-tests crate change (the mock-http unit test is sufficient and faster). The existing `mock-integration-tests/tests/integration/main.rs::test_forward_route_is_recognized` continues to exist as a Decision-shape assertion; no change required.
+The existing `crates/mock-integration-tests/tests/integration/main.rs::test_forward_route_is_recognized` continues to exist as a Decision-shape assertion; no change required.
 
 - [ ] **Step 10: Add failure-path test (upstream unreachable → 502)**
 
