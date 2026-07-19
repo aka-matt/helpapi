@@ -338,19 +338,18 @@ async fn build_decision_response(
         Decision::Mock { response, .. } => build_mock_response(response).await,
         Decision::Reject { response, .. } => build_reject_response(response).await,
         Decision::Forward { plan, .. } => {
-            let size = request_data.body.size_bytes();
-            // Quick local check on the request body size — the upstream body
-            // size is enforced separately on the response.
-            if size > max_response_bytes {
-                return Err(HttpError::ResponseTooLarge {
-                    size,
-                    limit: max_response_bytes,
-                });
-            }
-
             let engine = state.engine.read().await;
             match state.client.send(plan, request_data, &engine).await {
-                Ok(response_data) => build_mock_response(response_data).await,
+                Ok(response_data) => {
+                    let size = response_data.body.size_bytes();
+                    if size > max_response_bytes {
+                        return Err(HttpError::ResponseTooLarge {
+                            size,
+                            limit: max_response_bytes,
+                        });
+                    }
+                    build_mock_response(response_data).await
+                }
                 Err(upstream_err) => {
                     let http_err: HttpError = upstream_err.into();
                     let reason = match &http_err {

@@ -228,3 +228,58 @@ async fn test_forward_returns_502_when_upstream_unreachable() {
     assert_eq!(resp.status(), 502);
     server.shutdown();
 }
+
+#[tokio::test]
+async fn test_forward_returns_502_when_upstream_body_exceeds_5_mi_b() {
+    // Spawn an upstream that returns a 6 MiB body
+    let upstream = axum::Router::new().route(
+        "/*path",
+        axum::routing::any(|| async {
+            let big = "x".repeat(6 * 1024 * 1024);
+            axum::http::Response::builder()
+                .status(200)
+                .header("Content-Type", "text/plain")
+                .body(axum::body::Body::from(big))
+                .unwrap()
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream_addr = listener.local_addr().unwrap();
+    let upstream_url = format!("http://{}/", upstream_addr);
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, upstream).await;
+    });
+
+    let cfg = format!(
+        r#"{{
+            "defaults": {{ "upstream_timeout_ms": 5000, "max_body_bytes": 1048576 }},
+            "routes": [{{
+                "id": "proxy", "priority": 100,
+                "match_rule": {{ "method": "GET", "path": "/proxy" }},
+                "action": {{ "type": "forward", "upstream": "{}" }}
+            }}]
+        }}"#,
+        upstream_url
+    );
+
+    let server = HttpServer::start_server(
+        ServerConfig::new("127.0.0.1", 0),
+        Arc::new(tokio::sync::RwLock::new(Engine::compile(&cfg).unwrap())),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(format!("http://{}/proxy", server.local_addr()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        502,
+        "expected 502 when upstream body exceeds max_response_bytes"
+    );
+    server.shutdown();
+}
