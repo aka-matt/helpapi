@@ -130,7 +130,10 @@ impl Runtime {
             Some(self.server_events_tx.clone()),
         )
         .await
-        .map_err(|e| RuntimeError::ServerError(e.to_string()))?;
+        .map_err(|e| {
+            self.status = RuntimeStatus::Failed;
+            RuntimeError::ServerError(e.to_string())
+        })?;
 
         self.server = Some(server);
         self.status = RuntimeStatus::Running;
@@ -237,6 +240,9 @@ impl Runtime {
         }
 
         self.status = RuntimeStatus::Stopped;
+
+        // Emit ServerStopped event so subscribers know the server has halted
+        let _ = self.events_tx.send(RuntimeEvent::ServerStopped);
 
         Ok(())
     }
