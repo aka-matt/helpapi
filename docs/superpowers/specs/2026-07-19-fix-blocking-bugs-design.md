@@ -1,13 +1,13 @@
-# Fix Four Blocking Bugs (B1-B4) from the Code Review
+# Fix Four Blocking Bugs (B1-B4) and Three Emergent Bugs (C1, C2, C4)
 
 **Date:** 2026-07-19
 **Status:** Draft
-**Authors:** Code review at `.superpowers/sdd/code-review-report.md`
+**Authors:** Code review at `.superpowers/sdd/code-review-report.md`; supplementary review at second-agent report (internal session log).
 **Scope:** `mock-core`, `mock-http`, `mock-runtime`, `mock-cli`, `mock-wasm`, `examples/*`, integration tests, `CLAUDE.md`
 
 ## Background
 
-The post-implementation code review (`.superpowers/sdd/code-review-report.md`) identified four blocking correctness bugs that together mean `mock-api` cannot demonstrate the MVP flows the README and example configs describe. This spec describes a single, self-contained patch that resolves all four without expanding scope.
+The post-implementation code review identified four blocking correctness bugs that together mean `mock-api` cannot demonstrate the MVP flows the README and example configs describe. A second, focused review surfaced three additional bugs (C1, C2, C4) that the original B1-B4 fix would either leave reintroducing or actively expose. This spec describes a single, self-contained patch that resolves all seven.
 
 ## Goals
 
@@ -16,13 +16,16 @@ The post-implementation code review (`.superpowers/sdd/code-review-report.md`) i
 3. The TUI starts a single render loop, not two.
 4. `Engine::compile` performs the same semantic validation as `mock_config::validate`, so configuration errors surface in every execution path.
 5. The "documented example flows" referenced in `examples/basic.json`, `examples/proxy.json`, `examples/transforms.json` (and any related docs) actually exercise those flows end-to-end against the fixed code.
+6. **C1:** The CLI integration test that currently hangs forever is bounded so the workspace test suite completes.
+7. **C2:** With B1 wiring forward execution, every `RequestStarted` has a paired terminal event under broadcast lag, and the TUI surfaces lag as a counter rather than dropping events silently.
+8. **C4:** With B1 wiring forward execution, redirect chains from a configured upstream cannot be used as an SSRF channel; reqwest follows no redirects.
 
 ## Non-Goals
 
-- I-row (Important) and N-row (Nit) findings from the review remain out of scope.
-- Clippy warning cleanups in `mock-core` remain out of scope unless they block compile.
+- I-row (Important) and N-row (Nit) findings from the original review remain out of scope (these now include C3 partial body on timeout, C5/C7 reload not applying server-side limits, C6 reloading-stopped-runtime status corruption, C8 fake debounce, C9 watcher not shut down in TUI, C10 incomplete terminal restoration on panic, C11 input consumption speed).
+- Clippy warning cleanups in `mock-core` and `mock-cli` remain out of scope unless they block compile.
 - WASM-side sensitive-header masking remains out of scope.
-- `BodyData` serde convergence (`mock-config` snake vs `mock-core` Pascal) remains out of scope — documented as a latent footgun.
+- `BodyData` serde convergence was promoted into B2's implementation outline (free side effect).
 - Phase 7+ features (recording, replay, fault injection, WebSocket) remain out of scope.
 
 ## Affected Crates and Files
@@ -37,7 +40,12 @@ The post-implementation code review (`.superpowers/sdd/code-review-report.md`) i
 | `crates/mock-http/src/client.rs` | B1 (return 502-class signal) |
 | `crates/mock-http/src/error.rs` | B1 (new `UpstreamFailed` variant → 502 mapping) |
 | `crates/mock-runtime/src/runtime.rs` | Update `bad_engine_config` test for B4 |
-| `crates/mock-cli/src/tui/app.rs` | B3 (delete duplicate `run_loop` call; once-install panic hook) |
+| `crates/mock-cli/src/tui/app.rs` | B3 (delete duplicate `run_loop` call; once-install panic hook), C2 (drain events) |
+| `crates/mock-cli/src/tui/state.rs` | C2 (add lag_count field) |
+| `crates/mock-cli/src/tui/widgets/status_bar.rs` | C2 (display Lagged counter) |
+| `crates/mock-cli/tests/integration.rs` | C1 (bounded-wait helper) |
+| `crates/mock-cli/src/commands/run.rs` | (no changes from B1-B4; C8/C9 deferred) |
+| `crates/mock-runtime/src/runtime.rs` | Update `bad_engine_config` test for B4; C2 receiver API |
 | `crates/mock-wasm/src/engine.rs` | B2 already correct after change (no edit expected) |
 | `examples/*.json` | Verify against fixed validator; remove fake `"value": "test-key-12345"` placeholder |
 | `crates/mock-integration-tests/tests/integration/main.rs` | Add a real-HTTP forward round-trip test |
@@ -152,6 +160,85 @@ After B2, the loader accepts `{type: "set_header", ...}` because the canonical `
 - `cargo test --workspace --all-features` for `mock-cli` should still pass.
 - Manual smoke test (described in PR description; not a code-level test): start `mock-api run --config examples/basic.json` and confirm the TUI renders one frame, `q` quits cleanly, terminal state is restored.
 
+## C1: CLI integration test bounded wait
+
+### Behavior change
+
+The CLI integration test at `crates/mock-cli/tests/integration.rs:189-197` currently spawns `mock-api run` and calls `.output()` on it, which blocks indefinitely. Replace with a bounded-wait approach that signals the child to exit and asserts the captured output within a deadline.
+
+### Implementation outline
+
+1. Replace `Command::new(...).output()` with `Command::spawn()`.
+2. Capture stdout/stderr into pipes.
+3. Poll a "ready" signal (e.g., `127.0.0.1:PORT` accepts connections) with a 5-second timeout using `std::sync::mpsc::channel` + `recv_timeout`.
+4. On the readiness signal succeeding, send a `kill()` or `Child::kill()` to stop the server.
+5. `child.wait()` for cleanup.
+6. Assert the captured output within a second 5-second budget; fail the test if exceeded.
+
+### Test plan
+
+- Replace the test body with the new bounded-wait flow.
+- A second test asserts that a malformed config (used by B4's existing `bad_engine_config` pattern) terminates within 1 second with a non-zero exit code and a clear error message.
+
+---
+
+## C2: Broadcast lag surfacing
+
+### Behavior change
+
+When a burst of runtime events arrives faster than the TUI consumes them, `broadcast` either drops the oldest events (returning `RecvError::Lagged`) or blocks new subscribers. The TUI must drain all immediately available events per render frame and surface lag as a counter — never silently lose events.
+
+### Implementation outline
+
+1. `crates/mock-runtime/src/runtime.rs:279-285` (`EventReceiver::recv_timeout`) — replace single-event receive with a `try_recv` loop:
+   ```rust
+   pub async fn drain(&mut self) -> (Vec<RuntimeEvent>, u64 /* lag_count */) {
+       let mut out = Vec::new();
+       let mut lag = 0;
+       loop {
+           match self.0.try_recv() {
+               Ok(event) => out.push(event),
+               Err(broadcast::error::TryRecvError::Lagged(n)) => lag += n,
+               Err(broadcast::error::TryRecvError::Empty) => break,
+               Err(broadcast::error::TryRecvError::Closed) => break,
+           }
+       }
+       (out, lag)
+   }
+   ```
+   Keep `recv_timeout` for callers that want a bounded wait; add a single-frame `drain_all_until_empty` helper that combines both (poll `try_recv` for up to `EVENT_POLL_INTERVAL_MS`, then return whatever buffered events remain).
+2. `crates/mock-cli/src/tui/state.rs` — add a `pub lag_count: u64` field and increment from the TUI main loop.
+3. `crates/mock-cli/src/tui/app.rs:96-102` — replace `recv_timeout` with `drain_all_until_empty`. On lag > 0, increment `state.lag_count` and log a `tracing::warn!`.
+4. `crates/mock-cli/src/tui/widgets/status_bar.rs` — when `state.lag_count > 0`, render `Lagged: <n>` next to status. Cap the displayed count (e.g., "99+").
+
+### Test plan
+
+- Add a unit test for `EventReceiver::drain`: send 1000 events to a freshly-subscribed receiver, call `drain`, expect a non-zero `lag_count` and that subsequent drains return remaining events.
+- Add a TUI smoke test that asserts `state.lag_count` is incremented after the burst.
+
+### Note
+
+`broadcast::channel(128)` buffer size is 128. Bursts > 128 events will always incur lag even with this fix; surfacing it is the only honest answer. Increasing the buffer is not done here because it only delays the problem and adds memory pressure.
+
+---
+
+## C4: Upstream redirect policy
+
+### Behavior change
+
+Reqwest's default redirect policy is unlimited; once B1 wires forward execution, an upstream that issues redirects can pivot a request to 127.0.0.1, 169.254.169.254, or any internal service. Forbid all redirects: relay the 3xx response to the client instead of chasing it.
+
+### Implementation outline
+
+1. `crates/mock-http/src/client.rs:20-22` — `UpstreamClient::new` (and `with_timeout`) build with `Client::builder().redirect(reqwest::redirect::Policy::none())`.
+2. No further code change — reqwest's behavior on redirect with this policy is to *return* the 3xx response (the same as if the client were a browser). The mock then relays that response to the caller, who can decide what to do.
+
+### Test plan
+
+- Add a unit test that builds a tiny upstream server returning 301 + `Location: http://127.0.0.1:1/`, calls `UpstreamClient::send`, and asserts the returned `ResponseData.status` is the upstream's 301 — not a successful fetch of the redirect target.
+
+---
+
 ## B4: Validation in `Engine::compile`
 
 ### Behavior change
@@ -200,26 +287,31 @@ No edit. The report describes findings as observed.
 ## End-to-end success criteria
 
 1. `cargo fmt --all --check` clean.
-2. `cargo test --workspace --all-features` green.
+2. `cargo test --workspace --all-features` green **and completes** (C1 ensures no test hangs forever).
 3. `cargo clippy --workspace --all-targets --all-features` does not regress relative to current state for the crates we touch (mock-core, mock-http, mock-runtime, mock-cli, mock-wasm). Pre-existing clippy errors in mock-core remain out of scope per Non-Goals.
 4. `examples/proxy.json` end-to-end: start `mock-api run --config examples/proxy.json` against an upstream that echoes the request method in the response body; `curl -X POST http://localhost:8080/api/data -d '{"a":1}'` returns the echoed response, not `102 Processing`.
 5. `examples/transforms.json` end-to-end: confirms the `set_header` transform visibly modifies the upstream request (test that introspects reqwest on the upstream side).
 6. TUI start: `mock-api run --config examples/basic.json --tui` renders one frame and quits cleanly on `q`.
+7. **C2:** Under a synthetic burst of 200 runtime events arriving within one render-frame interval, the TUI's `state.lag_count` is ≥ 0 (never negative), the status bar shows `Lagged: <n>`, and no exception / panic occurs.
+8. **C4:** A test upstream that responds with 301 + `Location: http://127.0.0.1:1/` causes the forwarded response to reach the client as the 301 status, not as a successful fetch from the redirect target.
 
 ## Out of scope (explicit)
 
 - I-row (Important) findings 1–10 from `.superpowers/sdd/code-review-report.md`.
+- C3 partial-body timeout; C5/C7 reload-and-update-limits; C6 reload-when-stopped; C8 file-watch debounce; C9 TUI watcher shutdown; C10 panic terminal restoration; C11 TUI input speed.
 - N-row (Nit) findings 1–11.
 - WASM opaque errors (WASM-side types need separate work).
-- `BodyData` serde-tag divergence.
 - Path-template header injection (would need a deeper templating redesign).
-- Pre-existing mock-core clippy errors.
+- Pre-existing clippy errors across all crates.
 
 ## Open questions
 
-None. The user pre-approved all four design choices:
+None. The user pre-approved all design choices:
 
 1. Validation: push `validate()` into `Engine::compile`.
-2. Transforms: reuse `mock_config::Transform`.
+2. Transforms: re-host canonical `Transform` in `mock_core::transform::spec` (resolved the Cargo cycle).
 3. Forward execution: `UpstreamClient::send` in `handle_route`.
 4. Forward errors: HTTP 502.
+5. **C2 Lag handling:** surface `Lagged: <n>` counter in status bar.
+6. **C4 SSRF:** `reqwest::redirect::Policy::none()` — relay 3xx responses.
+7. **C1 bounded wait:** kill-on-timeout pattern for the hanging CLI test.
