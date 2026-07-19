@@ -7,6 +7,7 @@ use axum::{Router, body::Body, extract::Request, response::Response, routing::an
 use mock_core::Engine;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tower::ServiceBuilder;
 use tower_http::compression::CompressionLayer;
@@ -89,6 +90,7 @@ impl HttpServer {
     pub async fn start_server(
         config: ServerConfig,
         engine: Arc<Engine>,
+        _events: Option<mpsc::Sender<()>>,
     ) -> Result<Self, HttpError> {
         let (shutdown_tx, mut shutdown_rx) = oneshot::channel::<()>();
 
@@ -185,12 +187,22 @@ async fn handle_route(
         }
         Err(e) => {
             error!("request handling error: {:?} - {}", e, e);
-            // Return a 500 error response
+            // Map error to appropriate HTTP status code
+            let status = match e {
+                HttpError::BodyTooLarge { .. } => axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+                _ => axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            let body_msg = match e {
+                HttpError::BodyTooLarge { size, limit } => {
+                    format!("Request body too large: {} bytes exceeds limit of {} bytes", size, limit)
+                }
+                _ => "Internal server error".to_string(),
+            };
             axum::response::Response::builder()
-                .status(axum::http::StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from(format!("Internal server error: {}", e)))
+                .status(status)
+                .body(Body::from(body_msg))
                 .unwrap_or_else(|_| {
-                    axum::response::Response::new(Body::from("Internal server error"))
+                    axum::response::Response::new(Body::from("Error"))
                 })
         }
     }
@@ -203,8 +215,9 @@ async fn handle_route(
 pub async fn run_server_with_shutdown(
     config: ServerConfig,
     engine: Arc<Engine>,
+    events: Option<mpsc::Sender<()>>,
 ) -> Result<(), HttpError> {
-    let server = HttpServer::start_server(config, engine).await?;
+    let server = HttpServer::start_server(config, engine, events).await?;
 
     let addr = server.local_addr();
     info!(%addr, "server listening, press Ctrl+C to stop");
@@ -276,7 +289,7 @@ mod tests {
         let config = ServerConfig::new("127.0.0.1", 0); // Port 0 = dynamic
         let engine = test_engine();
 
-        let server = HttpServer::start_server(config, engine).await.unwrap();
+        let server = HttpServer::start_server(config, engine, None).await.unwrap();
 
         // Verify it bound to some port
         assert!(server.local_addr().port() > 0);
@@ -291,7 +304,7 @@ mod tests {
         let config = ServerConfig::new("127.0.0.1", 0);
         let engine = test_engine();
 
-        let server = HttpServer::start_server(config, engine).await.unwrap();
+        let server = HttpServer::start_server(config, engine, None).await.unwrap();
         let addr = server.local_addr();
 
         // Make a request to verify server is running

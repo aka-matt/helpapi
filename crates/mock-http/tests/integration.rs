@@ -31,7 +31,7 @@ async fn test_mock_route_returns_json_response() {
     let config = ServerConfig::new("127.0.0.1", 0);
     let engine = test_engine();
 
-    let server = HttpServer::start_server(config, engine).await.unwrap();
+    let server = HttpServer::start_server(config, engine, None).await.unwrap();
     let addr = server.local_addr();
 
     let client = reqwest::Client::new();
@@ -56,7 +56,7 @@ async fn test_unmatched_route_returns_404() {
     let config = ServerConfig::new("127.0.0.1", 0);
     let engine = test_engine();
 
-    let server = HttpServer::start_server(config, engine).await.unwrap();
+    let server = HttpServer::start_server(config, engine, None).await.unwrap();
     let addr = server.local_addr();
 
     let client = reqwest::Client::new();
@@ -87,7 +87,7 @@ async fn test_priority_ordering() {
     let engine = Arc::new(Engine::compile(json).unwrap());
 
     let config = ServerConfig::new("127.0.0.1", 0);
-    let server = HttpServer::start_server(config, engine).await.unwrap();
+    let server = HttpServer::start_server(config, engine, None).await.unwrap();
     let addr = server.local_addr();
 
     let client = reqwest::Client::new();
@@ -120,7 +120,7 @@ async fn test_post_request_with_json_body() {
     let engine = Arc::new(Engine::compile(json).unwrap());
 
     let config = ServerConfig::new("127.0.0.1", 0);
-    let server = HttpServer::start_server(config, engine).await.unwrap();
+    let server = HttpServer::start_server(config, engine, None).await.unwrap();
     let addr = server.local_addr();
 
     let client = reqwest::Client::new();
