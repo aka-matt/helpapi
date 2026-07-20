@@ -47,6 +47,102 @@ fn mock_api() -> Command {
     Command::new(bin_path)
 }
 
+/// Spawns `mock-api` with the given args, waits up to 5 s for `startup_signal`
+/// to appear on stderr (or for the process to exit), then waits
+/// `hard_kill_after` before sending SIGKILL. This bounds the test wall-clock
+/// time and prevents the integration test from hanging on a long-running
+/// `run` server.
+fn run_with_timeout(
+    args: &[&str],
+    startup_signal: impl Fn(&str) -> bool,
+    hard_kill_after: Duration,
+) -> std::process::Output {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+
+    let stderr_buf: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let stdout_buf: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let mut child = mock_api()
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn mock-api");
+
+    // Drain pipes in background threads so the OS pipe buffer cannot fill and
+    // block the child.
+    let stderr_reader = {
+        let buf = Arc::clone(&stderr_buf);
+        let mut pipe = child.stderr.take().expect("stderr piped");
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 256];
+            loop {
+                match pipe.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let s = String::from_utf8_lossy(&chunk[..n]).into_owned();
+                        buf.lock().unwrap().push_str(&s);
+                    }
+                }
+            }
+        })
+    };
+    let stdout_reader = {
+        let buf = Arc::clone(&stdout_buf);
+        let mut pipe = child.stdout.take().expect("stdout piped");
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 256];
+            loop {
+                match pipe.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        buf.lock().unwrap().extend_from_slice(&chunk[..n]);
+                    }
+                }
+            }
+        })
+    };
+
+    // Poll stderr until the startup signal is observed, the child exits on
+    // its own, or the deadline elapses.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if let Ok(Some(_status)) = child.try_wait() {
+            // Child exited before the signal was seen — likely a fast-fail
+            // (e.g. invalid config). Caller can still inspect stderr.
+            break;
+        }
+        {
+            let snapshot = stderr_buf.lock().unwrap().clone();
+            if startup_signal(&snapshot) {
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // Hold the process briefly so the caller can observe it, then kill it.
+    std::thread::sleep(hard_kill_after);
+    let _ = child.kill();
+    let status = child.wait().expect("wait after kill");
+
+    let stderr = stderr_buf.lock().unwrap().clone().into_bytes();
+    let stdout = stdout_buf.lock().unwrap().clone();
+
+    // Allow reader threads to finish gracefully.
+    let _ = stderr_reader.join();
+    let _ = stdout_reader.join();
+
+    std::process::Output {
+        status,
+        stdout,
+        stderr,
+    }
+}
+
 /// Creates a temp file with the given content and returns the path.
 fn temp_file(content: &str) -> PathBuf {
     let mut file = NamedTempFile::with_suffix(".json").unwrap();
@@ -189,24 +285,59 @@ fn test_run_command_with_nonexistent_config() {
 fn test_run_command_with_valid_config_starts_and_stops() {
     let config_path = temp_file(valid_config());
 
-    // Use timeout to kill the server after a short period
-    let output = mock_api()
-        .args(["run", "--config"])
-        .arg(config_path.as_os_str())
-        .arg("--log-format=pretty")
-        .output()
-        .expect("failed to execute run command");
-
-    // Server should have started successfully (or timed out)
-    // Check it didn't fail immediately with config errors
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stderr),
-        String::from_utf8_lossy(&output.stdout)
+    let output = run_with_timeout(
+        &[
+            "run",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--log-format=pretty",
+        ],
+        |stderr| stderr.contains("server listening") || stderr.contains("starting HTTP server"),
+        Duration::from_millis(500),
     );
-    assert!(!combined.contains("failed to create runtime"));
-    assert!(!combined.contains("invalid configuration"));
-    assert!(!combined.contains("no such file"));
+
+    // It may have been killed — that's fine. We assert it didn't fail with
+    // configuration errors before we killed it.
+    let combined = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !combined.contains("failed to create runtime"),
+        "stderr was: {}",
+        combined
+    );
+    assert!(
+        !combined.contains("invalid configuration"),
+        "stderr was: {}",
+        combined
+    );
+    assert!(
+        !combined.contains("no such file"),
+        "stderr was: {}",
+        combined
+    );
+}
+
+#[test]
+fn test_run_command_with_malformed_config_exits_quickly() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bad.json");
+    std::fs::write(&path, "{ this is not JSON").unwrap();
+
+    let started = std::time::Instant::now();
+    let output = mock_api()
+        .args(["run", "--config", path.to_str().unwrap()])
+        .output()
+        .expect("failed to run");
+    let elapsed = started.elapsed();
+
+    assert!(
+        !output.status.success(),
+        "malformed config should cause non-zero exit"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "malformed config should exit fast; took {:?}",
+        elapsed
+    );
 }
 
 #[test]
