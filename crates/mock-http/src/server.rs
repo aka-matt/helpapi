@@ -90,12 +90,8 @@ pub struct HttpServer {
     addr: SocketAddr,
     /// Channel to signal shutdown.
     shutdown_tx: oneshot::Sender<()>,
-    /// Event channel sender for runtime events.
-    events_tx: Option<mpsc::Sender<RuntimeEvent>>,
     /// Join handle for the server task.
     _join_handle: tokio::task::JoinHandle<()>,
-    /// Engine reference for hot reload.
-    engine: Arc<RwLock<Engine>>,
 }
 
 impl HttpServer {
@@ -190,9 +186,7 @@ impl HttpServer {
         Ok(Self {
             addr,
             shutdown_tx,
-            events_tx: events,
             _join_handle: join_handle,
-            engine,
         })
     }
 
@@ -533,7 +527,7 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Server should no longer be accepting connections
-        let response = client.get(format!("http://{}/test", addr)).send().await;
+        let _response = client.get(format!("http://{}/test", addr)).send().await;
         // May fail or succeed depending on timing, but we're just testing shutdown
     }
 }

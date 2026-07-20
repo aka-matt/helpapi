@@ -12,8 +12,6 @@ pub const MAX_REQUESTS: usize = 1000;
 /// A single request record displayed in the request list.
 #[derive(Debug, Clone)]
 pub struct RequestRecord {
-    /// Timestamp when the request was received.
-    pub timestamp: std::time::Instant,
     /// HTTP method.
     pub method: String,
     /// Request path.
@@ -42,7 +40,6 @@ impl RequestRecord {
     /// Creates a new RequestRecord from a request started event.
     pub fn from_started(request_id: &str, summary: &mock_http::events::RequestSummary) -> Self {
         Self {
-            timestamp: std::time::Instant::now(),
             method: summary.method.clone(),
             path: summary.path.clone(),
             request_headers: summary.headers.clone(),
@@ -271,7 +268,6 @@ mod tests {
     fn test_select_previous_wraps() {
         let mut state = AppState::new();
         state.requests.push_back(RequestRecord {
-            timestamp: std::time::Instant::now(),
             method: "GET".to_string(),
             path: "/test".to_string(),
             request_headers: Vec::new(),
@@ -293,7 +289,6 @@ mod tests {
     fn test_clear_history() {
         let mut state = AppState::new();
         state.requests.push_back(RequestRecord {
-            timestamp: std::time::Instant::now(),
             method: "GET".to_string(),
             path: "/test".to_string(),
             request_headers: Vec::new(),
@@ -316,7 +311,6 @@ mod tests {
     fn test_filtered_requests_empty_filter() {
         let mut state = AppState::new();
         state.requests.push_back(RequestRecord {
-            timestamp: std::time::Instant::now(),
             method: "GET".to_string(),
             path: "/test".to_string(),
             request_headers: Vec::new(),
@@ -337,7 +331,6 @@ mod tests {
     fn test_filtered_requests_with_filter() {
         let mut state = AppState::new();
         state.requests.push_back(RequestRecord {
-            timestamp: std::time::Instant::now(),
             method: "GET".to_string(),
             path: "/test".to_string(),
             request_headers: Vec::new(),
@@ -351,7 +344,6 @@ mod tests {
             request_id: "1".to_string(),
         });
         state.requests.push_back(RequestRecord {
-            timestamp: std::time::Instant::now(),
             method: "POST".to_string(),
             path: "/other".to_string(),
             request_headers: Vec::new(),

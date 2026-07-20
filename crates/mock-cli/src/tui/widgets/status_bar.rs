@@ -86,7 +86,6 @@ mod tests {
 
     #[test]
     fn test_status_bar_new() {
-        let bar = StatusBar::new();
-        assert!(true); // Just verify it constructs
+        let _bar = StatusBar::new();
     }
 }

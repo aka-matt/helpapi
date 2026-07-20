@@ -10,14 +10,16 @@ const SENSITIVE_HEADERS: &[&str] = &["authorization", "cookie", "proxy-authoriza
 const MASKED_VALUE: &str = "***MASKED***";
 
 /// Checks if a header name is sensitive (should be masked in the UI).
-pub fn is_sensitive_header(name: &str) -> bool {
+#[cfg_attr(not(test), allow(dead_code))]
+fn is_sensitive_header(name: &str) -> bool {
     let name_lower = name.to_lowercase();
     SENSITIVE_HEADERS.iter().any(|h| *h == name_lower)
 }
 
 /// Returns a masked version of the header value if the header is sensitive,
 /// otherwise returns the original value.
-pub fn mask_header_value(name: &str, value: &str) -> String {
+#[cfg_attr(not(test), allow(dead_code))]
+fn mask_header_value(name: &str, value: &str) -> String {
     if is_sensitive_header(name) {
         MASKED_VALUE.to_string()
     } else {

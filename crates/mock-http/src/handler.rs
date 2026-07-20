@@ -223,20 +223,6 @@ pub async fn build_reject_response(response: ResponseData) -> Result<Response, H
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mock_core::Engine;
-
-    fn test_engine() -> Arc<Engine> {
-        let json = r#"{
-            "defaults": {"upstream_timeout_ms": 5000, "max_body_bytes": 1048576},
-            "routes": [{
-                "id": "get-user",
-                "priority": 100,
-                "match_rule": {"method": "GET", "path": "/users/:id"},
-                "action": {"type": "mock", "response": {"status": 200, "json_body": {"id": 1}}}
-            }]
-        }"#;
-        Arc::new(Engine::compile(json).unwrap())
-    }
 
     #[tokio::test]
     async fn test_convert_request() {

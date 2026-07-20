@@ -9,5 +9,3 @@ mod state;
 pub mod widgets;
 
 pub use app::App;
-pub use event_handler::{mask_sensitive_headers, truncate_body};
-pub use state::{AppState, MAX_REQUESTS, RequestRecord};

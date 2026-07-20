@@ -80,7 +80,6 @@ pub struct Engine {
 #[derive(Debug, Clone)]
 struct EngineDefaults {
     upstream_timeout_ms: u64,
-    max_body_bytes: usize,
 }
 
 /// Unmatched config extracted from config.
@@ -393,10 +392,6 @@ fn parse_defaults(config: &serde_json::Value) -> EngineDefaults {
             .and_then(|d| d.get("upstream_timeout_ms"))
             .and_then(|v| v.as_u64())
             .unwrap_or(10_000),
-        max_body_bytes: defaults
-            .and_then(|d| d.get("max_body_bytes"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(1_048_576) as usize,
     }
 }
 
@@ -1031,8 +1026,9 @@ mod tests {
         let request = RequestData::new("GET", "/users/42");
         let decision = engine.decide(request).unwrap();
 
-        // elapsed_us should be >= 0 (recorded)
-        assert!(decision.metadata().elapsed_us >= 0);
+        // elapsed_us is recorded as a u64 microsecond count; assert it is present
+        // (any recorded duration fits in u64, so we just verify the field is set).
+        let _ = decision.metadata().elapsed_us;
     }
 
     // --- Compilation errors ---

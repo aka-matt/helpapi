@@ -47,7 +47,6 @@ mod tests {
 
     #[test]
     fn test_schema_generates_valid_json() {
-        let cmd = SchemaCommand::new(None);
         // This should generate valid JSON schema
         let schema = mock_config::generate_schema();
         let parsed: serde_json::Value = serde_json::from_str(&schema).unwrap();

@@ -433,7 +433,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_receiver_drain_reports_lag() {
-        let mut runtime = Runtime::new(valid_config()).await.unwrap();
+        let runtime = Runtime::new(valid_config()).await.unwrap();
         let mut receiver = runtime.subscribe();
 
         // Publish 200 events while no one is listening
