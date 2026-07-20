@@ -13,6 +13,12 @@ use commands::Command;
 #[command(
     name = "mock-api",
     about = "A mock API CLI tool with WASM export capability",
+    long_about = "mock-api serves as a configurable HTTP mock server: load a JSON \
+                  rule config, match incoming requests against the rules, and either \
+                  return a local canned response or transparently forward to an \
+                  upstream API with optional JSON-Pointer transforms.\n\n\
+                  The same engine is also published as a WASM library for browser \
+                  and Node.js reuse (see the `mock-wasm` crate).",
     version
 )]
 struct Cli {
@@ -22,34 +28,62 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Validate a mock-api configuration file.
+    /// Validate a mock-api configuration file (parse + semantic checks).
+    #[command(long_about = "Parse and validate a JSON configuration file without \
+                            starting a server. Exits 0 on success, 1 on any error.\n\n\
+                            Example:\n  \
+                            mock-api validate --config examples/basic.json")]
     Validate {
         /// Path to the configuration file to validate.
-        #[arg(short, long)]
+        #[arg(short, long, value_name = "PATH")]
         config: PathBuf,
     },
-    /// Run the mock API server.
+    /// Run the mock API server (foreground, blocks until Ctrl-C).
+    #[command(long_about = "Start the mock API server using the rules in the given \
+                            JSON config file. The server watches the config file for \
+                            changes and hot-reloads on every successful save.\n\n\
+                            Examples:\n  \
+                            mock-api run --config examples/basic.json\n  \
+                            mock-api run -c examples/basic.json --mode tui\n  \
+                            mock-api run -c examples/proxy.json --log-format json")]
     Run {
-        /// Path to the configuration file.
-        #[arg(short, long)]
+        /// Path to the configuration file (required).
+        #[arg(short, long, value_name = "PATH")]
         config: Option<PathBuf>,
-        /// Log format (pretty or json).
-        #[arg(long, default_value = "pretty")]
+        /// Log format. `pretty` for human-readable colored output, `json` for
+        /// line-delimited JSON suitable for log aggregators.
+        #[arg(long, value_enum, default_value_t = commands::run::LogFormat::Pretty)]
         log_format: commands::run::LogFormat,
-        /// Run mode (standard or tui).
-        #[arg(long, default_value = "standard")]
+        /// Run mode. `standard` runs the server in the foreground with structured
+        /// logs to stderr (production/CI). `tui` runs the same server under an
+        /// interactive Ratatui interface showing live request history (local dev).
+        #[arg(long, value_enum, default_value_t = commands::run::RunMode::Standard)]
         mode: commands::run::RunMode,
     },
     /// Generate a JSON schema for configuration files.
+    #[command(
+        long_about = "Print (or write to a file) a JSON Schema that describes \
+                            the configuration file format. Useful for editor \
+                            autocompletion and config validation in CI.\n\n\
+                            Example:\n  \
+                            mock-api schema --output mock-api.schema.json"
+    )]
     Schema {
-        /// Output file path (default: stdout).
-        #[arg(short, long)]
+        /// Output file path. If omitted, the schema is written to stdout.
+        #[arg(short, long, value_name = "PATH")]
         output: Option<PathBuf>,
     },
     /// Print the effective configuration after applying defaults.
+    #[command(
+        long_about = "Parse the given config, apply server-side defaults, and \
+                            print the resolved configuration as pretty JSON. Useful \
+                            for debugging \"what did the engine actually see?\".\n\n\
+                            Example:\n  \
+                            mock-api print-effective-config --config examples/basic.json"
+    )]
     PrintEffectiveConfig {
-        /// Path to the configuration file.
-        #[arg(short, long)]
+        /// Path to the configuration file to read.
+        #[arg(short, long, value_name = "PATH")]
         config: PathBuf,
     },
     /// Show version information.

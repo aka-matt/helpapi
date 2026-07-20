@@ -11,13 +11,13 @@ use tokio::signal;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
-/// Log format option.
-#[derive(Debug, Clone, Copy, Default)]
+/// Log format option for the `run` subcommand.
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 pub enum LogFormat {
-    /// Pretty formatted logs (default).
+    /// Human-readable logs with colors and aligned fields (default).
     #[default]
     Pretty,
-    /// JSON formatted logs.
+    /// Line-delimited JSON logs, suitable for log aggregators.
     Json,
 }
 
@@ -33,13 +33,15 @@ impl std::str::FromStr for LogFormat {
     }
 }
 
-/// Run mode option.
-#[derive(Debug, Clone, Copy, Default)]
+/// Run mode for the `run` subcommand.
+#[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 pub enum RunMode {
-    /// Standard logging mode (default).
+    /// Run the server in the foreground with structured logs to stderr.
+    /// Use this for production, CI, and when piping logs to a file.
     #[default]
     Standard,
-    /// TUI mode with interactive terminal UI.
+    /// Run the server with an interactive Ratatui TUI showing live request
+    /// history. Use this for local development and debugging.
     Tui,
 }
 
