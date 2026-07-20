@@ -37,7 +37,11 @@ impl App {
             let original = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |info| {
                 let _ = crossterm::terminal::disable_raw_mode();
-                let _ = crossterm::execute!(std::io::stderr(), DisableBracketedPaste, LeaveAlternateScreen);
+                let _ = crossterm::execute!(
+                    std::io::stderr(),
+                    DisableBracketedPaste,
+                    LeaveAlternateScreen
+                );
                 original(info);
             }));
         });
@@ -57,7 +61,9 @@ impl App {
             runtime.subscribe()
         };
 
-        let res = self.run_loop(&mut terminal, &mut state, &mut event_receiver).await;
+        let res = self
+            .run_loop(&mut terminal, &mut state, &mut event_receiver)
+            .await;
 
         let _ = crossterm::execute!(std::io::stderr(), DisableBracketedPaste);
         let _ = crossterm::terminal::disable_raw_mode();
