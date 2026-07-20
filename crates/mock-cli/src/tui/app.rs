@@ -32,48 +32,33 @@ impl App {
 
     /// Runs the TUI application.
     pub async fn run(&self) -> anyhow::Result<()> {
-        // Set up panic hook for terminal cleanup
-        let original_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |panic_info| {
-            // Attempt to restore terminal state
-            let _ = crossterm::terminal::disable_raw_mode();
-            let _ = crossterm::execute!(std::io::stderr(), LeaveAlternateScreen);
-            // Call the original hook
-            original_hook(panic_info);
-        }));
+        static PANIC_HOOK_INSTALLED: std::sync::Once = std::sync::Once::new();
+        PANIC_HOOK_INSTALLED.call_once(|| {
+            let original = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                let _ = crossterm::terminal::disable_raw_mode();
+                let _ = crossterm::execute!(std::io::stderr(), DisableBracketedPaste, LeaveAlternateScreen);
+                original(info);
+            }));
+        });
 
-        // Enter the alternate screen and enable raw mode
         crossterm::terminal::enable_raw_mode()?;
         crossterm::execute!(std::io::stderr(), EnterAlternateScreen)?;
         crossterm::execute!(std::io::stderr(), EnableBracketedPaste)?;
 
-        // Create the terminal backend
         let backend = CrosstermBackend::new(std::io::stderr());
         let mut terminal = Terminal::new(backend)?;
 
-        // Create the app state
         let mut state = crate::tui::state::AppState::new();
 
-        // Subscribe to runtime events
         let mut event_receiver = {
             let runtime = self.runtime.read().await;
             state.runtime_status = runtime.status();
             runtime.subscribe()
         };
 
-        // Run the async event loop using the current runtime
-        let res = tokio::runtime::Handle::current().block_on(self.run_loop(
-            &mut terminal,
-            &mut state,
-            &mut event_receiver,
-        ));
+        let res = self.run_loop(&mut terminal, &mut state, &mut event_receiver).await;
 
-        // Main event loop
-        let res = self
-            .run_loop(&mut terminal, &mut state, &mut event_receiver)
-            .await;
-
-        // Cleanup: restore terminal state
         let _ = crossterm::execute!(std::io::stderr(), DisableBracketedPaste);
         let _ = crossterm::terminal::disable_raw_mode();
         let _ = crossterm::execute!(std::io::stderr(), LeaveAlternateScreen);
