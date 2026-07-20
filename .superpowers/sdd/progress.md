@@ -37,6 +37,19 @@ All 18 tasks complete. Implementation covers Phase 0 through Phase 7.
 - Task 5 (B3): complete (commits c287c16..42714f7, review clean) — TUI no longer panics with "Cannot start a runtime from within a runtime"; panic hook installed via `std::sync::Once`; bracketed paste cleaned up on shutdown
 - Task 6 (C1): complete (commits 42714f7..1ce819c, review clean) — bounded-wait helper for the previously-hanging `run` integration test; new fast-fail malformed-config test; implementer also fixed the brief's latent once-only stderr-take bug with background reader threads
 - Task 7 (C4): complete (commits 1ce819c..8167e0d, review clean) — `reqwest::redirect::Policy::none()` on both `UpstreamClient::new` and `UpstreamClient::with_timeout` closes redirect-based SSRF; regression test asserts 301 is returned, not chased
+- Task 8 (docs/smoke/ledger): complete (commits 8167e0d..ad5bccd, review clean) — `examples/transforms.json` placeholder flipped to `<set-your-key-here>`; ledger section appended; end-to-end forward smoke against `httpbin.org` PASS via the actual configured route (`/api/forward` on 8082); brief's literal smoke command (`/api/data` on 8080) was a stale-port/path mismatch from the plan and was overridden
+  - Important (process): `.superpowers/sdd/.gitignore` contains a bare `*`, so every ledger append requires `git add -f`. Whitelist `progress.md` or relocate in a follow-up housekeeping commit.
+
+## Final whole-branch review
+
+- **Reviewer verdict:** Ready to merge with one housekeeping fix.
+- **Correction to my earlier claim:** the fmt drift in `crates/mock-cli/src/tui/app.rs:37,57` was actually introduced by Task 5 (B3, commit `42714f7`) — confirmed by checking out `b281ce5` (the merge base) into a worktree; `cargo fmt --all --check` exits 0 there. Per-task review for Task 5 did not catch this; the final reviewer did. M1 is a real regression that escaped Task 5.
+- **M1 (blocker):** `cargo fmt -p mock-cli` produces ~14 lines of wrapping changes. Mechanical fix in a follow-up housekeeping commit.
+- **M2 (cheap improvement):** `from_spec.rs` tests cover 2 of 8 variants; expand to cover all 8.
+- **M3 (CI gate verify):** `cargo deny check` not run locally (cargo-deny not installed); the new `schemars = "0.8"` pin needs to resolve cleanly in CI.
+- **M4 (process):** Plan template's smoke command mismatches the actual config port/path. Open as follow-up to fix the plan template.
+- **M5 (process):** `.superpowers/sdd/.gitignore` bare `*`. Open as follow-up.
+- **M6 (out of scope, pre-existing):** `test_transform_config_is_parsed` PascalCase fixture drift; `mock-core` clippy debt (8 lib + 2 test). Pre-existing watchpoints.
 
 ## Blocking-bug fix patch (post-review)
 - B1 (forward execution): commit above; verified by Phase 7 round-trip integration test
