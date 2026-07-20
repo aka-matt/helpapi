@@ -19,6 +19,7 @@ impl UpstreamClient {
     pub fn new() -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to create upstream HTTP client");
 
@@ -29,6 +30,7 @@ impl UpstreamClient {
     pub fn with_timeout(timeout: Duration) -> Self {
         let client = Client::builder()
             .timeout(timeout)
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to create upstream HTTP client");
 
@@ -247,5 +249,29 @@ mod tests {
     fn test_upstream_client_with_timeout() {
         let client = UpstreamClient::with_timeout(Duration::from_secs(10));
         drop(client);
+    }
+
+    #[tokio::test]
+    async fn test_upstream_does_not_follow_redirects() {
+        // Spawn a server that responds 301 + Location: http://127.0.0.1:1/
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = sock.read(&mut buf).await;
+            let response = "HTTP/1.1 301 Moved Permanently\r\nLocation: http://127.0.0.1:1/\r\nContent-Length: 0\r\n\r\n";
+            let _ = sock.write_all(response.as_bytes()).await;
+        });
+
+        let client = UpstreamClient::with_timeout(Duration::from_secs(2));
+        let response = client.get(&format!("http://{}/", addr)).await.unwrap();
+        assert_eq!(
+            response.status, 301,
+            "expected the 301 to be returned, not chased"
+        );
+
+        task.abort();
     }
 }
