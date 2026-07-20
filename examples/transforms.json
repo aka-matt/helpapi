@@ -127,7 +127,7 @@
           {
             "type": "set_header",
             "name": "X-API-Key",
-            "value": "test-key-12345"
+            "value": "<set-your-key-here>"
           },
           {
             "type": "set_header",
