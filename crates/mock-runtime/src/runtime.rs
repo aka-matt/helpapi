@@ -37,7 +37,7 @@ pub struct Runtime {
     /// The HTTP server instance.
     server: Option<HttpServer>,
     /// Channel for emitting runtime events to subscribers (broadcast).
-    events_tx: broadcast::Sender<RuntimeEvent>,
+    pub(crate) events_tx: broadcast::Sender<RuntimeEvent>,
     /// Channel for sending events from server to the broadcast forwarder.
     server_events_tx: mpsc::Sender<RuntimeEvent>,
     /// Handle for the event forwarding task.
@@ -273,6 +273,40 @@ impl Drop for Runtime {
 pub struct EventReceiver(broadcast::Receiver<RuntimeEvent>);
 
 impl EventReceiver {
+    /// Drains all currently available events after waiting for the first event.
+    ///
+    /// The returned lag count is the number of events skipped by the broadcast
+    /// channel before or during the drain.
+    pub async fn drain_all_until_empty(
+        &mut self,
+        wait: std::time::Duration,
+    ) -> (Vec<RuntimeEvent>, u64) {
+        let mut out = Vec::new();
+        let mut lag = 0u64;
+
+        // First, wait up to `wait` for at least one event.
+        match tokio::time::timeout(wait, self.0.recv()).await {
+            Ok(Ok(event)) => out.push(event),
+            Ok(Err(broadcast::error::RecvError::Lagged(n))) => {
+                lag += n;
+            }
+            Ok(Err(broadcast::error::RecvError::Closed)) => return (out, lag),
+            Err(_) => return (out, lag),
+        }
+
+        // Then drain everything else without waiting.
+        loop {
+            match self.0.try_recv() {
+                Ok(event) => out.push(event),
+                Err(broadcast::error::TryRecvError::Lagged(n)) => lag += n,
+                Err(broadcast::error::TryRecvError::Empty)
+                | Err(broadcast::error::TryRecvError::Closed) => break,
+            }
+        }
+
+        (out, lag)
+    }
+
     /// Receives the next event, waiting up to `timeout`.
     ///
     /// Returns `None` if the timeout expires.
@@ -395,6 +429,31 @@ mod tests {
         assert!(event.is_ok());
         let event = event.unwrap().unwrap();
         assert!(matches!(event, RuntimeEvent::ServerStarted { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_event_receiver_drain_reports_lag() {
+        let mut runtime = Runtime::new(valid_config()).await.unwrap();
+        let mut receiver = runtime.subscribe();
+
+        // Publish 200 events while no one is listening
+        for _ in 0..200 {
+            let _ = runtime.events_tx.send(RuntimeEvent::ServerStopped);
+        }
+
+        // Drain
+        let (events, lag) = receiver
+            .drain_all_until_empty(std::time::Duration::from_millis(50))
+            .await;
+        assert!(
+            lag > 0,
+            "expected at least one Lagged report after 200 events"
+        );
+        assert!(!events.is_empty());
+        assert!(
+            events.len() < 200,
+            "drain should not return more events than the buffer could carry"
+        );
     }
 
     // --- reload ---

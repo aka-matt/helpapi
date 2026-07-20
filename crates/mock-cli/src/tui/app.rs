@@ -94,10 +94,11 @@ impl App {
             }
 
             // Poll for runtime events
-            if let Ok(Some(event)) = event_receiver
-                .recv_timeout(std::time::Duration::from_millis(EVENT_POLL_INTERVAL_MS))
-                .await
-            {
+            let (events, lag) = event_receiver
+                .drain_all_until_empty(std::time::Duration::from_millis(EVENT_POLL_INTERVAL_MS))
+                .await;
+            state.lag_count = state.lag_count.saturating_add(lag);
+            for event in events {
                 state.handle_event(&event);
             }
 

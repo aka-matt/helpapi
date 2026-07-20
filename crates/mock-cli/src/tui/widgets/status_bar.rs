@@ -42,7 +42,7 @@ impl StatusBar {
 
         let rule_count_text = format!("{} rules", state.rule_count);
 
-        let spans = vec![
+        let mut spans = vec![
             Span::styled(" status: ", Style::default().fg(Color::Gray)),
             Span::styled(status_text, Style::default().fg(status_color)),
             Span::styled(" | address: ", Style::default().fg(Color::Gray)),
@@ -50,6 +50,19 @@ impl StatusBar {
             Span::styled(" | ", Style::default().fg(Color::Gray)),
             Span::styled(&rule_count_text, Style::default().fg(Color::Cyan)),
         ];
+
+        if state.lag_count > 0 {
+            let display = if state.lag_count > 99 {
+                "99+".to_string()
+            } else {
+                state.lag_count.to_string()
+            };
+            spans.push(Span::styled(" | ", Style::default().fg(Color::Gray)));
+            spans.push(Span::styled(
+                format!("Lagged: {display}"),
+                Style::default().fg(Color::Red),
+            ));
+        }
 
         let line = Line::from(spans);
 

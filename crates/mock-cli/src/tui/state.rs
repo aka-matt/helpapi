@@ -76,6 +76,8 @@ pub struct AppState {
     pub server_address: Option<String>,
     /// Number of rules in the current configuration.
     pub rule_count: usize,
+    /// Number of runtime events skipped due to broadcast lag. Surfaced in the TUI.
+    pub lag_count: u64,
     /// Request history.
     pub requests: VecDeque<RequestRecord>,
     /// Index of the currently selected request.
@@ -99,6 +101,7 @@ impl AppState {
             runtime_status: mock_runtime::RuntimeStatus::Stopped,
             server_address: None,
             rule_count: 0,
+            lag_count: 0,
             requests: VecDeque::with_capacity(MAX_REQUESTS),
             selected_request: None,
             active_panel: Panel::RequestList,
@@ -239,6 +242,7 @@ mod tests {
         assert_eq!(state.runtime_status, mock_runtime::RuntimeStatus::Stopped);
         assert!(state.server_address.is_none());
         assert_eq!(state.rule_count, 0);
+        assert_eq!(state.lag_count, 0);
         assert!(state.requests.is_empty());
         assert!(state.selected_request.is_none());
         assert_eq!(state.active_panel, Panel::RequestList);
