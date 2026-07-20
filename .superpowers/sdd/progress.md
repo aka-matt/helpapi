@@ -51,6 +51,16 @@ All 18 tasks complete. Implementation covers Phase 0 through Phase 7.
 - **M5 (process):** `.superpowers/sdd/.gitignore` bare `*`. Open as follow-up.
 - **M6 (out of scope, pre-existing):** `test_transform_config_is_parsed` PascalCase fixture drift; `mock-core` clippy debt (8 lib + 2 test). Pre-existing watchpoints.
 
+## Final housekeeping commits
+
+- **M1 (commit `479e9b4`):** `cargo fmt -p mock-cli` re-wrapped two lines in `crates/mock-cli/src/tui/app.rs` (+8/-2, no semantic change). `cargo fmt --all --check` now exits 0.
+- **M2 (commit `722067f`):** expanded `from_spec.rs` round-trip tests from 2 to 17 — every `Transform` variant now has a name + side-effect test, including the externally-tagged `BodyData` wire format for `ReplaceBody`.
+- **Final CI gate:** `cargo fmt --all --check` exit 0; `cargo test --workspace --lib` → 251 passed, 0 failed (15 new from M2); clippy clean on touched files (pre-existing mock-core diagnostics documented and out of scope).
+
+## Patch complete
+
+All 8 bug-fix tasks landed and reviewed clean. Final-review fixes (M1, M2) applied. Branch `step4_M27_grok` is at `722067f`, ahead of `main` by 44 commits. Ready for finishing-a-development-branch.
+
 ## Blocking-bug fix patch (post-review)
 - B1 (forward execution): commit above; verified by Phase 7 round-trip integration test
 - B2 (transform snake_case): commit above; verified by `test_transforms_set_header_in_route`
