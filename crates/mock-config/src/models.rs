@@ -38,6 +38,17 @@ impl Default for Config {
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    /// Path to a JKS (Java KeyStore) file containing the TLS certificate and
+    /// private key. When set, the server serves HTTPS instead of HTTP.
+    #[serde(default)]
+    pub keystore_file: Option<String>,
+    /// Password protecting the JKS keystore integrity (plaintext, not encrypted).
+    #[serde(default)]
+    pub keystore_password: Option<String>,
+    /// Password protecting the private key entry inside the keystore
+    /// (plaintext, not encrypted). Defaults to `keystore_password` when omitted.
+    #[serde(default)]
+    pub key_password: Option<String>,
 }
 
 impl Default for ServerConfig {
@@ -45,6 +56,9 @@ impl Default for ServerConfig {
         ServerConfig {
             host: "127.0.0.1".to_string(),
             port: 8080,
+            keystore_file: None,
+            keystore_password: None,
+            key_password: None,
         }
     }
 }
@@ -155,6 +169,7 @@ mod tests {
             server: ServerConfig {
                 host: "0.0.0.0".to_string(),
                 port: 3000,
+                ..Default::default()
             },
             defaults: DefaultsConfig {
                 upstream_timeout_ms: 5000,
@@ -228,6 +243,40 @@ mod tests {
             let parsed: BodyData = serde_json::from_str(&json).unwrap();
             assert_eq!(variant, parsed);
         }
+    }
+
+    #[test]
+    fn test_server_config_tls_roundtrip() {
+        let json = r#"{
+            "host": "0.0.0.0",
+            "port": 8443,
+            "keystore_file": "examples/test-keystore.jks",
+            "keystore_password": "changeit",
+            "key_password": "changeit"
+        }"#;
+        let parsed: ServerConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.host, "0.0.0.0");
+        assert_eq!(parsed.port, 8443);
+        assert_eq!(
+            parsed.keystore_file.as_deref(),
+            Some("examples/test-keystore.jks")
+        );
+        assert_eq!(parsed.keystore_password.as_deref(), Some("changeit"));
+        assert_eq!(parsed.key_password.as_deref(), Some("changeit"));
+
+        let serialized = serde_json::to_string(&parsed).unwrap();
+        let reparsed: ServerConfig = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(parsed, reparsed);
+    }
+
+    #[test]
+    fn test_server_config_without_tls_fields() {
+        // Old configs without TLS fields must still parse (defaults to None).
+        let json = r#"{"host": "127.0.0.1", "port": 8080}"#;
+        let parsed: ServerConfig = serde_json::from_str(json).unwrap();
+        assert!(parsed.keystore_file.is_none());
+        assert!(parsed.keystore_password.is_none());
+        assert!(parsed.key_password.is_none());
     }
 
     #[test]

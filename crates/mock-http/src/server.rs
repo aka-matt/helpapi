@@ -24,6 +24,21 @@ use crate::handler::{build_mock_response, build_reject_response, handle_request}
 /// Default maximum response body size in bytes (5 MiB).
 pub const DEFAULT_MAX_RESPONSE_BYTES: usize = 5 * 1024 * 1024;
 
+/// TLS settings for serving HTTPS from a JKS (Java KeyStore) file.
+///
+/// Passwords are held in plaintext — they come straight from the JSON config,
+/// which intentionally stores them unencrypted.
+#[derive(Debug, Clone)]
+pub struct TlsSettings {
+    /// Path to the JKS keystore file.
+    pub keystore_file: String,
+    /// Password protecting the keystore integrity (plaintext).
+    pub keystore_password: String,
+    /// Password protecting the private key entry (plaintext).
+    /// When `None`, `keystore_password` is used instead.
+    pub key_password: Option<String>,
+}
+
 /// Configuration for the HTTP server.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
@@ -37,6 +52,8 @@ pub struct ServerConfig {
     pub upstream_timeout_ms: u64,
     /// Maximum upstream response body size in bytes.
     pub max_response_bytes: usize,
+    /// TLS settings. When set, the server serves HTTPS instead of HTTP.
+    pub tls: Option<TlsSettings>,
 }
 
 impl ServerConfig {
@@ -48,6 +65,7 @@ impl ServerConfig {
             max_body_bytes: 1_048_576, // 1 MiB default
             upstream_timeout_ms: 10_000,
             max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES,
+            tls: None,
         }
     }
 
@@ -67,6 +85,17 @@ impl ServerConfig {
     pub fn with_max_response_bytes(mut self, bytes: usize) -> Self {
         self.max_response_bytes = bytes;
         self
+    }
+
+    /// Enables HTTPS with the given TLS settings (JKS keystore).
+    pub fn with_tls(mut self, tls: TlsSettings) -> Self {
+        self.tls = Some(tls);
+        self
+    }
+
+    /// Returns whether the server serves HTTPS.
+    pub fn is_tls(&self) -> bool {
+        self.tls.is_some()
     }
 
     /// Returns the socket address for binding.
@@ -103,9 +132,13 @@ impl HttpServer {
     /// The engine is stored behind an `Arc<RwLock<Engine>>` to support hot reload —
     /// on each request, the current engine is read from the lock.
     ///
+    /// When `config.tls` is set, the server serves HTTPS using the certificate
+    /// and private key loaded from the configured JKS keystore.
+    ///
     /// # Errors
     ///
-    /// Returns [`HttpError::BindError`] if the server fails to bind to the address.
+    /// Returns [`HttpError::BindError`] if the server fails to bind to the address,
+    /// or [`HttpError::TlsError`] if the JKS keystore cannot be loaded.
     pub async fn start_server(
         config: ServerConfig,
         engine: Arc<RwLock<Engine>>,
@@ -129,7 +162,18 @@ impl HttpServer {
             source: e,
         })?;
 
-        info!(%addr, "starting HTTP server");
+        // Load the TLS configuration (if any) before spawning the server task so
+        // that keystore errors are reported to the caller immediately.
+        let rustls_config = match &config.tls {
+            Some(tls) => Some(crate::tls::load_rustls_config(tls).await?),
+            None => None,
+        };
+
+        if rustls_config.is_some() {
+            info!(%addr, "starting HTTPS server");
+        } else {
+            info!(%addr, "starting HTTP server");
+        }
 
         // Build router with middleware
         let app = Router::new()
@@ -164,16 +208,44 @@ impl HttpServer {
 
         // Spawn server task
         let join_handle = tokio::spawn(async move {
-            let server = axum::serve(listener, app);
+            match rustls_config {
+                // HTTPS: serve via axum-server with rustls.
+                Some(tls_config) => {
+                    let handle = axum_server::Handle::new();
+                    let shutdown_handle = handle.clone();
+                    tokio::spawn(async move {
+                        let _ = shutdown_rx.await;
+                        info!("server shutdown signal received");
+                        shutdown_handle.graceful_shutdown(Some(Duration::from_secs(5)));
+                    });
 
-            tokio::select! {
-                result = server => {
-                    if let Err(e) = result {
+                    let serve_result = match listener.into_std() {
+                        Ok(std_listener) => {
+                            axum_server::from_tcp_rustls(std_listener, tls_config)
+                                .handle(handle)
+                                .serve(app.into_make_service())
+                                .await
+                        }
+                        Err(e) => Err(e),
+                    };
+                    if let Err(e) = serve_result {
                         error!("server error: {}", e);
                     }
                 }
-                _ = &mut shutdown_rx => {
-                    info!("server shutdown signal received");
+                // Plain HTTP: serve via axum.
+                None => {
+                    let server = axum::serve(listener, app);
+
+                    tokio::select! {
+                        result = server => {
+                            if let Err(e) = result {
+                                error!("server error: {}", e);
+                            }
+                        }
+                        _ = &mut shutdown_rx => {
+                            info!("server shutdown signal received");
+                        }
+                    }
                 }
             }
 
@@ -486,6 +558,22 @@ mod tests {
         assert_eq!(config.max_body_bytes, 2_097_152);
         assert_eq!(config.upstream_timeout_ms, 5_000);
         assert_eq!(config.max_response_bytes, 10_485_760);
+        assert!(!config.is_tls());
+    }
+
+    #[tokio::test]
+    async fn test_server_config_with_tls() {
+        let config = ServerConfig::new("127.0.0.1", 8443).with_tls(TlsSettings {
+            keystore_file: "keystore.jks".to_string(),
+            keystore_password: "changeit".to_string(),
+            key_password: None,
+        });
+
+        assert!(config.is_tls());
+        let tls = config.tls.as_ref().unwrap();
+        assert_eq!(tls.keystore_file, "keystore.jks");
+        assert_eq!(tls.keystore_password, "changeit");
+        assert_eq!(tls.key_password, None);
     }
 
     #[tokio::test]

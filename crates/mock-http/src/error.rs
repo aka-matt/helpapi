@@ -45,6 +45,10 @@ pub enum HttpError {
     /// The upstream response exceeded the configured limit.
     #[error("upstream response too large: {size} bytes exceeds limit of {limit} bytes")]
     ResponseTooLarge { size: usize, limit: usize },
+
+    /// TLS (HTTPS) setup failed, e.g. the JKS keystore could not be loaded.
+    #[error("TLS configuration error: {reason}")]
+    TlsError { reason: String },
 }
 
 impl From<UpstreamError> for HttpError {

@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8443,
+    "keystore_file": "examples/test-keystore.jks",
+    "keystore_password": "changeit",
+    "key_password": "changeit"
+  },
+  "defaults": {
+    "upstream_timeout_ms": 10000,
+    "max_body_bytes": 1048576
+  },
+  "routes": [
+    {
+      "id": "get-user",
+      "priority": 100,
+      "match_rule": {
+        "method": "GET",
+        "path": "/users/:id"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": {
+            "id": 1,
+            "name": "Alice",
+            "email": "alice@example.com"
+          }
+        }
+      }
+    },
+    {
+      "id": "hello",
+      "priority": 10,
+      "match_rule": {
+        "method": "GET",
+        "path": "/"
+      },
+      "action": {
+        "type": "mock",
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "json_body": {
+            "message": "Hello over HTTPS!"
+          }
+        }
+      }
+    }
+  ],
+  "unmatched": {
+    "action": {
+      "type": "mock",
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json_body": {
+          "error": "Not Found",
+          "message": "No route matched the request"
+        }
+      }
+    }
+  }
+}

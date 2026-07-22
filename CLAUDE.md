@@ -101,6 +101,19 @@ JSON Config → mock-cli reads → mock-config parses/validates → mock-runtime
 }
 ```
 
+### HTTPS (TLS)
+
+Set these optional `server` fields to serve HTTPS from a JKS (Java KeyStore) file
+instead of plain HTTP. Passwords are stored in plaintext by design:
+
+- `keystore_file`: path to the `.jks` file (required to enable TLS)
+- `keystore_password`: keystore integrity password (required when `keystore_file` is set)
+- `key_password`: private key entry password (optional; falls back to `keystore_password`)
+
+Example: `examples/https.json` together with `examples/test-keystore.jks`
+(self-signed wildcard cert for `*.localhost`/`localhost`, password `changeit`):
+`mock-api run -c examples/https.json`, then `curl -k https://localhost:8443/users/1`.
+
 ## Phased Implementation
 
 The project follows a staged delivery plan:

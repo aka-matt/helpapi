@@ -6,10 +6,32 @@
 use std::sync::Arc;
 
 use mock_core::Engine;
-use mock_http::{HttpServer, ServerConfig, events::RuntimeEvent};
+use mock_http::{HttpServer, ServerConfig, TlsSettings, events::RuntimeEvent};
 use tokio::sync::{RwLock, broadcast, mpsc};
 
 use crate::error::RuntimeError;
+
+/// Builds the mock-http server configuration from the parsed JSON config,
+/// including optional TLS (HTTPS) settings from the `server` section.
+fn build_server_config(config: &mock_config::Config) -> ServerConfig {
+    let server_config = ServerConfig::new(&config.server.host, config.server.port)
+        .with_max_body_bytes(config.defaults.max_body_bytes)
+        .with_upstream_timeout_ms(config.defaults.upstream_timeout_ms);
+
+    match (
+        &config.server.keystore_file,
+        &config.server.keystore_password,
+    ) {
+        (Some(keystore_file), Some(keystore_password)) => server_config.with_tls(TlsSettings {
+            keystore_file: keystore_file.clone(),
+            keystore_password: keystore_password.clone(),
+            key_password: config.server.key_password.clone(),
+        }),
+        // Validation guarantees keystore_file and keystore_password are set
+        // together; anything else means plain HTTP.
+        _ => server_config,
+    }
+}
 
 /// Runtime status indicating the current state of the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,9 +96,7 @@ impl Runtime {
         }
 
         // Build server config
-        let server_config = ServerConfig::new(&config.server.host, config.server.port)
-            .with_max_body_bytes(config.defaults.max_body_bytes)
-            .with_upstream_timeout_ms(config.defaults.upstream_timeout_ms);
+        let server_config = build_server_config(&config);
 
         // Compile the engine
         let engine =
@@ -207,9 +227,7 @@ impl Runtime {
         drop(engine);
 
         // Update server config if needed
-        self.server_config = ServerConfig::new(&new_config.server.host, new_config.server.port)
-            .with_max_body_bytes(new_config.defaults.max_body_bytes)
-            .with_upstream_timeout_ms(new_config.defaults.upstream_timeout_ms);
+        self.server_config = build_server_config(&new_config);
 
         let rule_count = new_config.routes.len();
         let _ = self

@@ -21,6 +21,7 @@ pub fn validate(config: &Config) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
 
     validate_version(config, &mut issues);
+    validate_tls(config, &mut issues);
     validate_route_ids(config, &mut issues);
     validate_priorities(config, &mut issues);
     validate_forward_urls(config, &mut issues);
@@ -38,6 +39,39 @@ fn validate_version(config: &Config, issues: &mut Vec<ValidationIssue>) {
             message: format!("version must be 1, got {}", config.version),
             severity: ValidationSeverity::Error,
             suggestion: Some("set version to 1".to_string()),
+        });
+    }
+}
+
+fn validate_tls(config: &Config, issues: &mut Vec<ValidationIssue>) {
+    let server = &config.server;
+    let has_keystore = server.keystore_file.is_some();
+    let has_store_password = server.keystore_password.is_some();
+    let has_key_password = server.key_password.is_some();
+
+    if !has_keystore && (has_store_password || has_key_password) {
+        issues.push(ValidationIssue {
+            code: "TLS_PASSWORD_WITHOUT_KEYSTORE".to_string(),
+            path: "/server".to_string(),
+            message: "keystore_password/key_password are set but keystore_file is missing"
+                .to_string(),
+            severity: ValidationSeverity::Error,
+            suggestion: Some(
+                "set server.keystore_file to a JKS file, or remove the TLS passwords".to_string(),
+            ),
+        });
+        return;
+    }
+
+    if has_keystore && !has_store_password {
+        issues.push(ValidationIssue {
+            code: "MISSING_KEYSTORE_PASSWORD".to_string(),
+            path: "/server/keystore_password".to_string(),
+            message: "keystore_password is required when keystore_file is set".to_string(),
+            severity: ValidationSeverity::Error,
+            suggestion: Some(
+                "set server.keystore_password to the JKS keystore password".to_string(),
+            ),
         });
     }
 }
@@ -204,6 +238,7 @@ mod tests {
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
                 port: 8080,
+                ..Default::default()
             },
             defaults: DefaultsConfig {
                 upstream_timeout_ms: 10_000,
@@ -416,5 +451,39 @@ mod tests {
         };
         let issues = validate(&config);
         assert!(!issues.iter().any(|i| i.code == "INVALID_JSON_POINTER"));
+    }
+
+    #[test]
+    fn test_validate_tls_valid_config() {
+        let mut config = valid_config();
+        config.server.keystore_file = Some("keystore.jks".to_string());
+        config.server.keystore_password = Some("changeit".to_string());
+        config.server.key_password = Some("keypass".to_string());
+        let issues = validate(&config);
+        assert!(
+            issues.is_empty(),
+            "valid TLS config should have no issues: {:?}",
+            issues
+        );
+    }
+
+    #[test]
+    fn test_validate_tls_password_without_keystore() {
+        let mut config = valid_config();
+        config.server.keystore_password = Some("changeit".to_string());
+        let issues = validate(&config);
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.code == "TLS_PASSWORD_WITHOUT_KEYSTORE")
+        );
+    }
+
+    #[test]
+    fn test_validate_tls_missing_keystore_password() {
+        let mut config = valid_config();
+        config.server.keystore_file = Some("keystore.jks".to_string());
+        let issues = validate(&config);
+        assert!(issues.iter().any(|i| i.code == "MISSING_KEYSTORE_PASSWORD"));
     }
 }

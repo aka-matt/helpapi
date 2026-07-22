@@ -515,6 +515,14 @@ mock-config.wasm
 }
 ```
 
+`server` 支持以下可选字段启用 HTTPS（使用 JKS 证书库，密码为明文存储）：
+
+- `keystore_file`：JKS 证书库文件路径（设置后即启用 TLS）
+- `keystore_password`：证书库密码（设置 `keystore_file` 时必填）
+- `key_password`：私钥密码（可选，缺省时使用 `keystore_password`）
+
+示例见 `examples/https.json` 与 `examples/test-keystore.jks`（自签名 `*.localhost`/`localhost` 泛域名证书，密码 `changeit`）。
+
 ### 5.2 Mock 路由示例
 
 ```json

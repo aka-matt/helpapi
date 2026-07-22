@@ -34,9 +34,10 @@ pub mod error;
 pub mod events;
 pub mod handler;
 pub mod server;
+pub mod tls;
 
 // Re-exports for convenience
 pub use client::UpstreamClient;
 pub use error::{HttpError, UpstreamError};
 pub use events::{DecisionType, RequestResult, RequestSummary, RuntimeEvent};
-pub use server::{HttpServer, ServerConfig};
+pub use server::{HttpServer, ServerConfig, TlsSettings};
